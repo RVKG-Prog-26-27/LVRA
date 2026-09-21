@@ -1,0 +1,32 @@
+# Python: pagaidu faili un virtuālās vides
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Lokālie iestatījumi un piekļuves dati
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.idea/
+.vs/
+
+# Atkarības un kompilēšanas rezultāti
+node_modules/
+build/
+dist/
+bin/
+obj/
+
+# Lielie dati un modeļu kontrolpunkti
+/data/raw/
+/models/checkpoints/
+
+# Sistēmas un pagaidu faili
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
