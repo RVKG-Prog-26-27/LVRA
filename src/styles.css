@@ -1,0 +1,295 @@
+/*
+  LVRA visual system
+  Idea: the work area is a Latvian school exercise book ("rūtiņu burtnīca"):
+  a light blue square grid with a red margin line. The result text sits on
+  ruled lines. Everything else stays quiet. System fonts only, so no
+  third-party font requests leave the user's browser.
+*/
+
+:root {
+  --paper: #ffffff;
+  --page: #f3f6f9;
+  --grid: #dde8f2;
+  --rule: #cfdcea;
+  --margin: #9e3039;      /* carmine, the colour of the Latvian flag */
+  --ink: #1d3a8a;         /* fountain-pen blue, used for actions */
+  --ink-dark: #142a66;
+  --text: #1f2533;
+  --muted: #586174;
+  --highlight: #fff0a3;   /* highlighter yellow for uncertain words */
+  --error-bg: #fbeced;
+
+  --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --square: 24px;
+  --margin-x: 2.25rem;
+
+  color-scheme: light;
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--page);
+  -webkit-text-size-adjust: 100%;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+}
+
+.page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 1.5rem;
+}
+
+/* Masthead */
+.masthead h1 {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 3.25rem;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-dark);
+}
+.fullname {
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--muted);
+}
+.intro {
+  margin: 1rem 0 1.25rem;
+  max-width: 34rem;
+}
+
+.demo-banner {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.9rem;
+  border-left: 4px solid var(--ink);
+  background: #eaf0fb;
+  font-size: 0.92rem;
+}
+
+/* The exercise-book sheet */
+.sheet {
+  position: relative;
+  padding: 1.5rem 1.25rem 1.75rem calc(var(--margin-x) + 1.25rem);
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(var(--margin), var(--margin)),
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 2px 100%, var(--square) var(--square), var(--square) var(--square);
+  background-position: var(--margin-x) 0, 0 0, 0 0;
+  background-repeat: no-repeat, repeat, repeat;
+  border-radius: 3px;
+  box-shadow: 0 1px 0 var(--rule), 0 12px 28px -18px rgba(20, 42, 102, 0.35);
+}
+.sheet > :first-child { margin-top: 0; }
+
+h2 {
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+
+.muted { color: var(--muted); margin: 0.6rem 0; font-size: 0.95rem; }
+.notice { margin: 1rem 0 0; padding: 0.75rem 0.9rem; background: #f4f6fa; border-left: 4px solid var(--muted); }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0.6rem 1.15rem;
+  border-radius: 6px;
+  border: 1.5px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--ink); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--ink-dark); }
+.btn-secondary { background: var(--paper); color: var(--ink); border-color: var(--ink); }
+.btn-secondary:hover:not(:disabled) { background: #eef3fc; }
+.btn-quiet { background: var(--paper); color: var(--text); border-color: var(--rule); font-weight: 500; }
+.btn-quiet:hover:not(:disabled) { border-color: var(--muted); }
+
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+.picker { display: grid; gap: 0.75rem; margin-bottom: 1rem; }
+@media (min-width: 560px) { .picker { grid-template-columns: 1fr 1fr; } }
+
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+.actions-main .btn-primary { flex: 1 1 12rem; }
+
+/* Preview */
+.preview-wrap { position: relative; }
+.preview {
+  display: flex;
+  justify-content: center;
+  background: #eef2f6;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+.preview canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  height: auto;
+  width: auto;
+  object-fit: contain;
+}
+.preview.is-busy canvas { opacity: 0.35; }
+
+/* Processing: the one animated moment, a line being written */
+.processing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 4px;
+}
+.processing-title { font-family: var(--serif); font-size: 1.35rem; margin: 0.75rem 0 0; }
+.ink-line {
+  width: 9rem;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--ink) 0 50%, transparent 50%) 0 0 / 200% 100%;
+  animation: write 1.6s ease-in-out infinite;
+}
+@keyframes write {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
+/* Errors */
+.error {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  background: var(--error-bg);
+  border-left: 4px solid var(--margin);
+}
+.error p { margin: 0.25rem 0; }
+.error-title { font-weight: 700; color: var(--margin); }
+.error .actions { margin-top: 0.75rem; }
+
+/* Result: ruled paper */
+.result h2 { margin-bottom: 0.25rem; }
+.legend { font-size: 0.92rem; color: var(--muted); margin: 0.5rem 0; }
+.legend-swatch { margin-right: 0.4rem; }
+
+.editor {
+  --line: 2rem;
+  margin-top: 0.75rem;
+  min-height: calc(var(--line) * 6 + 1rem);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.25rem 0.9rem 0.75rem;
+  font-size: 1.1rem;
+  line-height: var(--line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background-color: var(--paper);
+  background-image: linear-gradient(to bottom, transparent calc(var(--line) - 1px), var(--rule) calc(var(--line) - 1px));
+  background-size: 100% var(--line);
+  background-position: 0 0.25rem;
+  background-attachment: local;
+  border: 1.5px solid var(--rule);
+  border-radius: 4px;
+  outline: none;
+  caret-color: var(--ink);
+}
+.editor:focus { border-color: var(--ink); }
+
+mark.uncertain {
+  background: var(--highlight);
+  color: inherit;
+  border-bottom: 2px dotted #b08900;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.toast { min-height: 1.5rem; margin: 0.6rem 0 0; font-weight: 600; color: var(--ink); }
+.toast-error { color: var(--margin); }
+
+/* Footer */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Privacy dialog */
+.privacy {
+  width: min(40rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  border: 0;
+  border-radius: 6px;
+  padding: 1.5rem;
+  color: var(--text);
+}
+.privacy::backdrop { background: rgba(20, 30, 50, 0.45); }
+.privacy h3 { font-size: 1rem; margin: 1rem 0 0.25rem; }
+.privacy p { margin: 0; }
+
+/* Developer panel (temporary) */
+.devpanel {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--muted);
+  font-size: 0.9rem;
+  background: var(--paper);
+}
+.devpanel summary { cursor: pointer; font-weight: 600; }
+.devpanel label { display: grid; gap: 0.25rem; margin-top: 0.6rem; }
+.devpanel select, .devpanel input { font: inherit; padding: 0.35rem; }
+
+@media (max-width: 480px) {
+  :root { --margin-x: 1.25rem; font-size: 16px; }
+  .page { padding-top: 1.25rem; }
+  .wordmark { font-size: 2.6rem; }
+  .sheet { padding: 1.25rem 1rem 1.5rem calc(var(--margin-x) + 0.9rem); }
+  .actions .btn { flex: 1 1 auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-line { animation: none; background: var(--ink); }
+}
