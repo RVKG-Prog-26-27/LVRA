@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # LVRA, Latvijas Valodas Rokraksta Atpazīšana
 
 A responsive web app (phone first) that turns a photo of handwritten Latvian text into ordinary digital text the user can read, correct and copy. Made by the Slepie team.
@@ -174,3 +175,6 @@ docs/API.md             contract for the recognition server
 - Very large photos (tens of megapixels) may fail to open on older phones with little memory; the user then sees a message to try another image.
 - HEIC photos open only in browsers that support HEIC (mainly Safari). Other browsers show the JPEG or PNG message.
 - Undo (Ctrl+Z) may not undo line breaks and pastes in the result editor, because these are inserted as plain text by the app.
+=======
+# LVRA
+>>>>>>> 2dba99254eac5fc104c7b2fba6fad84de97fd166
