@@ -24,7 +24,7 @@ whole line images in.
 import torch
 import torch.nn as nn
 
-
+#ПОТОМ РАЗОБРАТЬСЯ КАК ЭТО РАБОТАЕТ
 class CNNBackbone(nn.Module):
     """Reduces a [B,1,32,W] line image to a [B,512,1,W'] feature map."""
 
