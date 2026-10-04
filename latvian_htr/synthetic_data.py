@@ -183,6 +183,6 @@ def generate_batch(n: int, corpus: list[str] | None = None) -> list[tuple[Image.
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)  # создаём папку samples (если уже есть - не ругаемся)
     # Генерируем 500 картинок и сохраняем каждую в файл.
-    for i, (img, text) in enumerate(generate_batch(500)):
+    for i, (img, text) in enumerate(generate_batch(50)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")

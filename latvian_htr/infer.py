@@ -2,7 +2,7 @@
 Распознавание (инференс): берём готовую обученную сеть и читаем текст с картинки.
 
 Как запускать:
-    python infer.py --checkpoint checkpoints/crnn_step2000.pt --image samples/sample_0.png
+    python infer.py --checkpoint checkpoints/crnn_step2000.pt --image samples/sample_0.png --beam-width 5
 
 Это финал всей цепочки: «картинка -> сеть выдаёт числа -> числа превращаются
 в буквы (CTC-декодирование) -> печатаем готовый текст».
@@ -14,7 +14,7 @@ import argparse
 import torch
 from PIL import Image
 
-from alphabet import NUM_CLASSES, decode_greedy
+from alphabet import NUM_CLASSES, decode_beam_search
 from dataset import image_to_tensor
 from model import CRNN
 from synthetic_data import TARGET_HEIGHT
@@ -33,19 +33,17 @@ def load_image(path: str) -> torch.Tensor:
     return image_to_tensor(img).unsqueeze(0)  # [1,1,H,W]
 
 
-def predict(model: CRNN, image_tensor: torch.Tensor, device: torch.device) -> str:
+def predict(model: CRNN, image_tensor: torch.Tensor, device: torch.device, beam_width: int = 5) -> str:
     """Прогоняет картинку через сеть и возвращает распознанный текст."""
     model.eval()  # режим «проверки» (не обучения): слои ведут себя стабильно
     # no_grad говорит: «ничего не запоминай для обучения». Экономит память и время,
     # ведь мы сейчас только читаем, а не учимся.
     with torch.no_grad():
         log_probs = model(image_tensor.to(device))  # [T,1,C] - вероятности символов на каждом шаге
-        # argmax выбирает для каждого шага символ с самой высокой вероятностью
-        # (возвращает его номер). squeeze(1) убирает лишнее измерение пачки,
-        # tolist() превращает результат в обычный список Python.
-        pred_indices = log_probs.argmax(dim=2).squeeze(1).tolist()  # [T]
-    # Превращаем список номеров в текст (схлопываем повторы, выбрасываем blank).
-    return decode_greedy(pred_indices)
+        # Для одной картинки убираем измерение batch: [T, 1, C] -> [T, C].
+        # Вместо argmax/greedy держим несколько лучших CTC-префиксов.
+        sequence_log_probs = log_probs.squeeze(1)  # [T, C]
+    return decode_beam_search(sequence_log_probs, beam_width=beam_width)
 
 
 # Запускается только при прямом вызове файла («python infer.py ...»).
@@ -54,6 +52,8 @@ if __name__ == "__main__":
     # required=True - без этих двух параметров программа не запустится.
     parser.add_argument("--checkpoint", type=str, required=True)  # путь к файлу с весами сети
     parser.add_argument("--image", type=str, required=True)       # путь к картинке для чтения
+    parser.add_argument("--beam-width", type=int, default=5,
+                        help="размер beam для CTC beam search (по умолчанию 5)")
     args = parser.parse_args()
 
     # Выбираем видеокарту, если она есть, иначе процессор.
@@ -65,6 +65,6 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
     image_tensor = load_image(args.image)
-    text = predict(model, image_tensor, device)
+    text = predict(model, image_tensor, device, beam_width=args.beam_width)
     # !r печатает строку «как в коде» - в кавычках, так видно пробелы по краям.
     print(f"Распознанный текст: {text!r}")
