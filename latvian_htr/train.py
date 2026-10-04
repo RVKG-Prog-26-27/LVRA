@@ -91,9 +91,25 @@ def train(args):
 
             # Прямой проход: сеть смотрит на картинки и выдаёт предсказания.
             log_probs = model(images)  # [T, B, C] - T шагов, B картинок, C символов
-            T = log_probs.size(0)      # сколько шагов выдала сеть
-            # Говорим CTC, что для каждой картинки в пачке длина ответа сети одинакова (T).
-            input_lengths = torch.full((images.size(0),), T, dtype=torch.long)
+            T = log_probs.size(0)      # максимальное число шагов в батче (по самой широкой картинке)
+
+            # ВАЖНО: картинки были дополнены справа до общей ширины max_w.
+            # widths содержит настоящую ширину каждой картинки ДО padding.
+            # Поэтому для каждого примера отдельно считаем, сколько шагов
+            # действительно получилось после CNN. Хвост после этого шага
+            # относится только к padding и не должен участвовать в CTC.
+            input_lengths = torch.tensor(
+                [model.output_length(int(w)) for w in widths],
+                dtype=torch.long,
+            )
+
+            # Защита от ошибки в случае рассинхронизации формулы output_length()
+            # и фактического размера выхода модели.
+            if input_lengths.max().item() > T:
+                raise RuntimeError(
+                    f"input_lengths содержит значение больше T: "
+                    f"max(input_lengths)={input_lengths.max().item()}, T={T}"
+                )
 
             # Считаем ошибку: насколько предсказание сети отличается от правильного текста.
             loss = ctc_loss(log_probs, targets, input_lengths, target_lengths)
