@@ -8,8 +8,7 @@ interface Props {
 }
 
 /**
- * Privacy notice in Latvian. The contact email comes from configuration
- * (VITE_PRIVACY_CONTACT_EMAIL) and is a placeholder until set.
+ * Privacy notice in Latvian. The contact email comes from src/config/config.ts.
  */
 export function PrivacyNotice({ open, onClose }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
