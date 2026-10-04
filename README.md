@@ -40,6 +40,8 @@ python train.py --steps 5000 --real-data data/real_dataset
 
 # secinājums uz viena attēla
 python infer.py --checkpoint checkpoints/crnn_step2000.pt --image samples/sample_0.png
+
+Для CTC beam search можно увеличить ширину поиска, например: `python infer.py --checkpoint checkpoints/crnn_step2000.pt --image samples/sample_0.png --beam-width 10`
 ```
 
 ## Kā pievienot reālus datus

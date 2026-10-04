@@ -28,7 +28,7 @@ from model import CRNN
 
 def build_dataset(real_data_path: str | None, synth_length: int):
     """Собирает «склад» данных для обучения: искусственные примеры + (если есть) настоящие."""
-    # Искусcственные данные есть всегда.
+    # Искусственные данные есть всегда.
     datasets = [SyntheticHTRDataset(length=synth_length)]
     if real_data_path:
         # Если указали папку с настоящими сканами - добавляем и их.
@@ -158,4 +158,3 @@ if __name__ == "__main__":
     random.seed(0)
     torch.manual_seed(0)
     train(args)
-
