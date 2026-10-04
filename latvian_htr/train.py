@@ -143,29 +143,16 @@ def train(args):
 if __name__ == "__main__":
     # ArgumentParser apraksta, kādus iestatījumus var nodot palaišanas laikā.
     parser = argparse.ArgumentParser()
-<<<<<<< HEAD
-    parser.add_argument("--steps", type=int, default=2000)         # сколько всего шагов обучения
-    parser.add_argument("--batch-size", type=int, default=64)      # сколько примеров в пачке
-    parser.add_argument("--lr", type=float, default=1e-3)          # скорость обучения (1e-3 = 0.001)
-    parser.add_argument("--synth-per-epoch", type=int, default=5000, help="сколько искусственных примеров делать за одну «эпоху» (один круг обучения)")
-    parser.add_argument("--real-data", type=str, default=None, help="путь к папке с настоящими сканами (когда они появятся)")
-    parser.add_argument("--num-workers", type=int, default=2)      # параллельные помощники для данных
-    parser.add_argument("--log-every", type=int, default=20)       # как часто печатать ошибку
-    parser.add_argument("--checkpoint-every", type=int, default=1000)  # как часто сохранять веса
-    parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")  # куда сохранять
-    args = parser.parse_args()  # читаем то, что ввёл пользователь
-=======
-    parser.add_argument("--steps", type=int, default=2000)         # kopējais apmācības soļu skaits
-    parser.add_argument("--batch-size", type=int, default=32)      # piemēru skaits paketē
-    parser.add_argument("--lr", type=float, default=1e-3)          # mācīšanās ātrums (1e-3 = 0.001)
-    parser.add_argument("--synth-per-epoch", type=int, default=5000, help="Cik mākslīgu piemēru vajadzētu izveidot vienā laikmetā (vienā apmācības ciklā)?")
-    parser.add_argument("--real-data", type=str, default=None, help="path to folder with real d")
-    parser.add_argument("--num-workers", type=int, default=2)      # paralēlie datu sagatavošanas palīgi
-    parser.add_argument("--log-every", type=int, default=20)       # cik bieži izdrukāt kļūdu
-    parser.add_argument("--checkpoint-every", type=int, default=500)  # cik bieži saglabāt svarus
-    parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")  # kur saglabāt
-    args = parser.parse_args()  # nolasām lietotāja ievadītos iestatījumus
->>>>>>> e190ff6678718620cb007d83cf822d4a60364f73
+    parser.add_argument("--steps", type=int, default=2000)         # learning steps
+    parser.add_argument("--batch-size", type=int, default=64)      # examples in one step
+    parser.add_argument("--lr", type=float, default=1e-3)          # the speed of learning (1e-3 = 0.001)
+    parser.add_argument("--synth-per-epoch", type=int, default=5000, help="how many artificial examples to make in one “epoch” (one round of training)")
+    parser.add_argument("--real-data", type=str, default=None, help="path to the folder with real scans (when they appear)")
+    parser.add_argument("--num-workers", type=int, default=2)      # parallel data helpers
+    parser.add_argument("--log-every", type=int, default=20)       # how often to print an error
+    parser.add_argument("--checkpoint-every", type=int, default=1000)  # how often save weights
+    parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")  # where to save 
+    args = parser.parse_args()  # read what user inputs
 
     # Fiksējam «nejaušību» ar skaitli 0, lai palaišanu varētu atkārtot ar tādu pašu rezultātu.
     random.seed(0)
