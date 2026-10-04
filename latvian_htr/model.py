@@ -1,160 +1,138 @@
 """
-Архитектура нейросети (её «устройство»). Это самый важный файл проекта.
+Neironu tīkla arhitektūra
 
-Модель называется CRNN: C = Convolutional (свёрточная), RNN = Recurrent
-(рекуррентная). Это стандартная схема для чтения текста с картинки.
-Работает как конвейер из трёх частей, которые идут ОДНА ЗА ДРУГОЙ:
+Modeli sauc par CRNN: C = konvolucionāls, RNN = rekurents. Šī ir standarta shēma teksta lasīšanai no attēliem.
 
-    картинка строки
-        |
-        v
-    1) CNN  - «глаза». Смотрит на картинку и находит штрихи, дуги, линии,
-              углы. Превращает картинку в последовательность «описаний»,
-              по одному описанию на каждый узкий вертикальный кусочек
-              (слева направо).
-        |
-        v
-    2) BiLSTM - «память и понимание контекста». Читает эту последовательность
-              и в обе стороны: слева направо И справа налево. Благодаря этому
-              понимает, что буква рядом с другими буквами значит. Например,
-              неразборчивая закорючка между «s» и «l» скорее всего «a».
-        |
-        v
-    3) Linear + CTC - «ответ». Для каждого кусочка выбирает, какая это
-              буква (или «пусто»). CTC - хитрый способ учиться, не размечая,
-              где именно на картинке стоит каждая буква.
+1) CNN - pārveido attēlu "aprakstu" secībā,
+viens apraksts katrai šaurai vertikālai šķēlei
+(no kreisās uz labo).
 
-Важно: CTC позволяет подавать на вход целую строку сразу. Не нужно заранее
-разрезать её на отдельные буквы, сеть сама разберётся.
+2) BiLSTM - "atmiņas un konteksta izpratne". Nolasa šo secību
+un abos virzienos: no kreisās uz labo UN no labās uz kreiso. Pateicoties tam,
+tas saprot, ko nozīmē burts blakus citiem burtiem. Piemēram,
+nesalasāms līklocis starp "s" un "l" visticamāk ir "a".
+
+3) Lineārs + CTC - "atbilde". Katrai šķēlei tas izvēlas, kurš burts tas ir
+(vai "tukš"). CTC ir gudrs veids, kā mācīties, neatzīmējot,
+kur tieši attēlā parādās katrs burts.
+
 """
 
-import torch                 # основная библиотека нейросетей
-import torch.nn as nn        # nn = neural networks: готовые «кирпичики» (слои) для сетей
+import torch                
+import torch.nn as nn      
 
 class CNNBackbone(nn.Module):
-    """«Глаза» сети. Уменьшает картинку [B, 1, 32, W] до карты признаков [B, 512, 1, W'].
-
-    Расшифровка размеров (это называется «форма» тензора):
-      B  - batch, сколько картинок обрабатываем одновременно;
-      1  - один канал (картинка серая, не цветная);
-      32 - высота картинки в пикселях;
-      W  - ширина картинки (у каждой своя).
-    На выходе: высота схлопнулась до 1, зато «каналов» стало 512. Это уже не
-    яркость пикселей, а 512 разных «признаков» - ответов на вопросы вроде
-    «здесь есть вертикальная палочка?», «здесь есть закруглённая дуга?».
-    W' - новая, меньшая ширина (примерно W / 4).
     """
-
+    Izmēru sadalījums:
+    B — batch, cik attēlu tiek apstrādāti vienlaicīgi;
+    1 — viens kanāls (pelēks, nevis krāsains attēls);
+    32 — attēla augstums pikseļos;
+    W — attēla platums (katram attēlam atšķirīgs).
+    Izvade: augstums ir sarucis līdz 1, bet "kanālu" skaits ir palielinājies līdz 512.
+    """
     def __init__(self):
-        # Обязательная строка в любой сети PyTorch: подготавливает базовый класс.
         super().__init__()
-        # nn.Sequential - «цепочка»: данные проходят через слои по порядку.
-        #
-        # Что такое слои, которые здесь используются:
-        #  - Conv2d(вход, выход, размер_окна, шаг, отступ) - СВЁРТКА. Маленькое
-        #    «окошко» 3x3 пикселя скользит по всей картинке и в каждом месте
-        #    считает, насколько там видна какая-то фигурка (линия, угол...).
-        #    Окошек много, каждое ищет своё. Сколько окошек - столько
-        #    «каналов» на выходе (64, 128, 256, 512...). Чем глубже слой,
-        #    тем сложнее фигурки: сначала штрихи, потом части букв.
-        #  - ReLU - «выпрямитель»: все отрицательные числа заменяет на 0,
-        #    положительные оставляет. Без таких нелинейных слоёв сеть
-        #    была бы просто одной большой умножалкой и ничего сложного
-        #    выучить не смогла бы. inplace=True - экономим память.
-        #  - MaxPool2d(2, 2) - «сжатие»: из каждого квадрата 2x2 оставляет
-        #    только самое большое число. Картинка уменьшается вдвое по
-        #    высоте и ширине, а самое важное сохраняется.
-        #  - MaxPool2d((2, 1), (2, 1)) - то же, но сжимает только по высоте
-        #    (в 2 раза), а ширину не трогает. Ширина нам нужна, ведь по ней
-        #    мы будем «читать» текст слева направо!
-        #  - BatchNorm2d - «нормализация»: приводит числа к удобному
-        #    масштабу, чтобы обучение шло быстрее и стабильнее.
+        # Šeit izmantoto slāņu skaidrojums:
+        # - Conv2d - KONVOLŪCIJA aprēķina
+        # izvades «kanālu» skaitu (64, 128, 256, 512...).
+        # - ReLU - «taisnotājs»: visus negatīvos skaitļus aizstāj ar 0,
+        # pozitīvos atstāj. Bez šādiem nelineāriem slāņiem tīkls
+        # būtu tikai viena liela reizinātāja un neko sarežģītu
+        # nespētu iemācīties.
+        # - MaxPool2d(2, 2) - «saspiešana»: no katra 2x2 kvadrāta atstāj
+        # tikai lielāko skaitli. Attēls kļūst divreiz mazāks pēc
+        # augstuma un platuma, saglabājot svarīgāko informāciju.
+        # - MaxPool2d((2, 1), (2, 1)) - tas pats, bet saspiež tikai pēc augstuma
+        # (2 reizes), platumu nemainot. Platums mums ir nepieciešams, jo pa to
+        # mēs «lasīsim» tekstu no kreisās uz labo pusi.
+        # - BatchNorm2d - «normalizācija»: pielāgo skaitļus ērtam
+        # mērogam, lai apmācība notiktu ātrāk un stabilāk.
         self.net = nn.Sequential(
-            # Блок 1: 1 канал -> 64 канала. Потом сжатие вдвое.
+            # 1. bloks: 1 kanāls -> 64 kanāli. Pēc tam saspiešana divreiz.
             nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),      # 32x W -> 16 x W/2
-            # Блок 2: 64 -> 128 каналов. Снова сжатие вдвое.
+            # 2. bloks: 64 -> 128 kanāli. Atkal saspiešana divreiz.
             nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),    # -> 8 x W/4
-            # Блок 3: две свёртки подряд (128 -> 256 -> 256), потом сжатие ТОЛЬКО по высоте.
+            # 3. bloks: divas konvolūcijas pēc kārtas (128 -> 256 -> 256), pēc tam saspiešana TIKAI pēc augstuma.
             nn.Conv2d(128, 256, 3, 1, 1), nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),  # -> 4 x W/4
-            # Блок 4: 256 -> 512 -> 512 каналов с нормализацией, снова сжатие только по высоте.
+            # 4. bloks: 256 -> 512 -> 512 kanāli ar normalizāciju, atkal saspiešana tikai pēc augstuma.
             nn.Conv2d(256, 512, 3, 1, 1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, 3, 1, 1), nn.BatchNorm2d(512), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),  # -> 2 x W/4
-            # Последняя свёртка с окном 2x2 без отступа: «съедает» оставшиеся 2 строки высоты
-            # в одну. Теперь высота = 1, а ширина стала на 1 меньше.
+            # Pēdējā konvolūcija ar 2x2 logu bez atkāpes: «apēd» atlikušās 2 augstuma rindas
+            # vienā. Tagad augstums = 1, bet platums ir par 1 mazāks.
             nn.Conv2d(512, 512, 2, 1, 0), nn.ReLU(inplace=True),  # -> 1 x (W/4 - 1)
         )
 
     def forward(self, x):
-        # forward - «прямой проход»: что делает слой, когда ему дали данные.
-        # Просто прогоняем картинку через всю цепочку выше.
+        # forward - izpilda slāni, kad tam padod datus.
         return self.net(x)
 
 
 class BiLSTMHead(nn.Module):
-    """«Голова» сети: читает последовательность признаков и выдаёт вероятности букв.
+    """
+    Tīkla “galva”: nolasa pazīmju secību un rada burtu varbūtības. 
 
-    LSTM - это тип слоя с «памятью». Он читает данные по порядку, шаг за
-    шагом, и помнит, что было раньше. Для текста это важно: чтобы понять
-    букву, нужно видеть соседние. «Bi» (bidirectional) значит «двунаправленный»:
-    два LSTM, один читает слева направо, другой справа налево, а результаты
-    склеиваются. Так каждая позиция знает и что было до неё, и что будет после.
+LSTM ir slāņa veids ar "atmiņu". Tas soli pa solim nolasa datus secībā
+soli, un atceras to, kas notika iepriekš. Tas ir svarīgi tekstam: saprast
+vēstuli, vajag redzēt kaimiņus. "Bi" (divvirzienu) nozīmē "divvirzienu":
+divi LSTM, viens nolasa no kreisās puses uz labo, otrs no labās uz kreiso, un rezultāti
+turēties kopā. Tātad katra pozīcija zina, kas notika pirms tās un kas notiks pēc tam.
     """
 
     def __init__(self, in_dim: int, hidden: int, num_classes: int, num_layers: int = 2):
         super().__init__()
-        # in_dim - сколько чисел описывают один кусочек картинки (у нас 512);
-        # hidden - размер «памяти» LSTM (сколько чисел он держит в голове);
-        # num_layers=2 - два LSTM, поставленные друг на друга: второй читает
-        #   результат первого и понимает ещё глубже;
-        # bidirectional=True - включаем чтение в обе стороны;
-        # batch_first=False - порядок измерений данных: [шаг, картинка в пачке, признаки].
+        # in_dim - cik skaitļi apraksta vienu attēla daļu (mums 512);
+        # hidden - LSTM «atmiņas» izmērs (cik skaitļus tas saglabā);
+        # num_layers=2 - divi viens virs otra novietoti LSTM slāņi: otrais lasa
+        # pirmā rezultātu un apstrādā to dziļāk;
+        # bidirectional=True - ieslēdzam lasīšanu abos virzienos;
+        # batch_first=False - datu dimensiju secība: [solis, attēls paketē, pazīmes].
         self.lstm = nn.LSTM(
             in_dim, hidden, num_layers=num_layers, bidirectional=True, batch_first=False
         )
-        # Linear - обычный «полносвязный» слой: берёт числа от LSTM и превращает
-        # их в оценки для каждого символа алфавита. Вход hidden * 2, потому что
-        # два направления склеились (каждое даёт по hidden чисел).
+        # Linear - parasts «pilnībā savienots» slānis: tas paņem LSTM skaitļus un pārveido
+        # tos par katra alfabēta simbola novērtējumiem. Ievade ir hidden * 2, jo
+        # abi virzieni tiek apvienoti (katrs dod hidden skaitļus).
         self.fc = nn.Linear(hidden * 2, num_classes)
 
     def forward(self, x):
         # x: [T, B, in_dim]
-        # T - сколько «кусочков» картинки по горизонтали (шагов по времени),
-        # B - сколько картинок в пачке,
-        # in_dim - сколько признаков описывают один кусочек.
-        out, _ = self.lstm(x)   # out - то, что LSTM «понял» на каждом шаге ("_" - память, она нам не нужна)
-        return self.fc(out)     # [T, B, num_classes]: оценки каждого символа для каждого шага
+        # T - cik attēla «daļu» ir horizontāli (laika soļu),
+        # B - cik attēlu ir paketē,
+        # in_dim - cik pazīmju apraksta vienu daļu.
+        out, _ = self.lstm(x)   # out - tas, ko LSTM «saprata» katrā solī ("_" - atmiņa, tā mums nav vajadzīga)
+        return self.fc(out)     # [T, B, num_classes]: katra simbola novērtējums katram solim
 
 
 class CRNN(nn.Module):
-    """Вся модель целиком: «глаза» (CNN) + «понимание» (BiLSTM)."""
+    """Viss modelis: "acis" (CNN) + "izpratne" (BiLSTM)."""
 
     def __init__(self, num_classes: int, lstm_hidden: int = 256):
         super().__init__()
-        self.cnn = CNNBackbone()  # глаза
-        # Голова: на вход приходит 512 признаков (столько каналов у CNN на выходе),
-        # на выходе - num_classes оценок (по числу символов в алфавите, включая blank).
+        self.cnn = CNNBackbone()  # acis
+        # Galva: ievadē saņem 512 pazīmes (tik izvades kanālu ir CNN),
+        # izvadē - num_classes novērtējumus (pēc alfabēta simbolu skaita, ieskaitot blank).
         self.rnn = BiLSTMHead(in_dim=512, hidden=lstm_hidden, num_classes=num_classes)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """
-        images: [B, 1, 32, W] - пачка картинок строк.
-        Возвращает логарифмы вероятностей формы [T, B, num_classes],
-        где T - длина последовательности после того, как CNN сжал картинку по ширине.
+        images: [B, 1, 32, W] — attēlu virkņu partija.
+        Atgriež varbūtību logaritmus formā [T, B, klašu_skaits],
+        kur T ir secības garums pēc tam, kad CNN ir saspiedis attēla platumu.
         """
-        feats = self.cnn(images)              # [B, 512, 1, W']  - CNN нашёл признаки
-        feats = feats.squeeze(2)              # [B, 512, W']     - убираем лишнее измерение высоты (оно равно 1)
-        # permute переставляет измерения местами: было [картинка, признаки, шаг],
-        # нужно [шаг, картинка, признаки] - именно так LSTM ждёт данные.
+        feats = self.cnn(images)              # [B, 512, 1, W']  - CNN atrada pazīmes
+        feats = feats.squeeze(2)              # [B, 512, W']     - noņemam lieko augstuma dimensiju (tā ir 1)
+        # permute pārkārto dimensijas: bija [attēls, pazīmes, solis],
+        # nepieciešams [solis, attēls, pazīmes] - tieši šādus datus sagaida LSTM.
         feats = feats.permute(2, 0, 1)        # [W'(=T), B, 512]
-        logits = self.rnn(feats)              # [T, B, num_classes]  - оценки символов
-        # log_softmax превращает оценки в логарифмы вероятностей (в сумме 100% по
-        # символам на каждом шаге). Именно в таком виде их хочет функция потерь CTC.
+        logits = self.rnn(feats)              # [T, B, num_classes]  - simbolu novērtējumi
+        # log_softmax pārvērš novērtējumus par varbūtību logaritmiem (summa ir 100% pa
+        # simboliem katrā solī). Tieši šādā formā tos sagaida CTC zaudējumu funkcija.
         return logits.log_softmax(dim=2)
 
     def output_length(self, input_width: int) -> int:
-        """Сколько шагов T получится на выходе CNN для картинки заданной ширины (нужно CTC)."""
-        w = input_width // 2 // 2  # два сжатия MaxPool(2,2) уменьшили ширину вчетверо
-        w = w - 1                  # последняя свёртка с окном 2 съела ещё один столбец
-        # max(w, 1) - гарантируем, что результат не меньше 1 (даже для очень узкой картинки).
+        """Cik soļus T tiks iegūts CNN izvadē attēlam ar noteiktu platumu (nepieciešams CTC)?"""
+        w = input_width // 2 // 2  # divas MaxPool(2,2) saspiešanas samazināja platumu četras reizes
+        w = w - 1                  # pēdējā konvolūcija ar 2 izmēra logu noņēma vēl vienu kolonnu
+        # max(w, 1) - garantējam, ka rezultāts nav mazāks par 1 (arī ļoti šauram attēlam).
         return max(w, 1)
