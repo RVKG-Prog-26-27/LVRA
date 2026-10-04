@@ -9,7 +9,6 @@ import { PrivacyNotice } from './components/PrivacyNotice';
 import { ProcessingStatus } from './components/ProcessingStatus';
 import { ResultEditor } from './components/ResultEditor';
 import { lv } from './i18n/lv';
-import { isMockMode } from './recognition/createRecognitionService';
 
 export default function App() {
   const { state, selectFile, rotate, recognize, cancel, reset } = useLvraApp();
@@ -26,11 +25,9 @@ export default function App() {
         <p className="intro">{lv.intro}</p>
       </header>
 
-      {isMockMode && (
-        <p className="demo-banner" role="note">
-          {lv.demoBanner}
-        </p>
-      )}
+      <p className="demo-banner" role="note">
+        {lv.demoBanner}
+      </p>
 
       <main className="sheet">
         {state.step === 'pick' && (

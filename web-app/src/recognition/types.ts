@@ -2,8 +2,8 @@
  * The contract between the app and any handwriting recognition backend.
  *
  * The UI only ever talks to HandwritingRecognitionService. To plug in the real
- * model, write a new class that implements this interface (or configure the
- * existing ApiRecognitionService) and select it in createRecognitionService.ts.
+ * model, write a new class that implements this interface and select it in
+ * createRecognitionService.ts.
  */
 
 export interface RecognizedWord {
