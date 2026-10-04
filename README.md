@@ -1,4 +1,4 @@
-# Latviešu rokrakstu atpazīšana — alpha versija_02
+# Latviešu rokrakstu atpazīšana — alphaa versija_02
 
 **LVRA (Latviešu Valodas Rokraksta Atpazīšana)** ir eksperimentāls latviešu rokraksta atpazīšanas projekts. Mērķis ir no rokrakstā rakstīta teksta attēla iegūt rediģējamu digitālu tekstu.
 
