@@ -1,6 +1,6 @@
 /**
- * TEMPORARY developer panel for testing with the mock service.
- * Visible only when the address contains ?dev=1. Intentionally in English:
+ * TEMPORARY developer panel for testing with the mock service
+ * Visible only when the address contains ?dev=1 :
  * it is a developer tool, not part of the user-facing app.
  * Remove together with the mock once the real model is connected.
  */

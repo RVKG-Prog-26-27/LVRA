@@ -1,7 +1,7 @@
 /**
  * Copies text to the clipboard. The modern Clipboard API needs a secure
  * context (HTTPS or localhost); the fallback covers testing on a phone over
- * the local network.
+ * the local network
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
   if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {

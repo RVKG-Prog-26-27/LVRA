@@ -8,7 +8,7 @@ interface Props {
 }
 
 /**
- * Privacy notice in Latvian. The contact email comes from src/config/config.ts.
+ * Privacy notice in Latvian. The contact email comes from src/config/config.ts
  */
 export function PrivacyNotice({ open, onClose }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -47,11 +47,7 @@ export function PrivacyNotice({ open, onClose }: Props) {
       <h3>Jūsu tiesības</h3>
       <p>
         Saskaņā ar Vispārīgo datu aizsardzības regulu jums ir tiesības saņemt informāciju par savu datu apstrādi. Ar jautājumiem rakstiet uz{' '}
-        <a href={`mailto:${email}`}>{email}</a>. Jums ir arī tiesības iesniegt sūdzību Datu valsts inspekcijā (
-        <a href="https://www.dvi.gov.lv" target="_blank" rel="noreferrer">
-          www.dvi.gov.lv
-        </a>
-        ).
+        <a href={`mailto:${email}`}>{email}</a>. 
       </p>
 
       <div className="actions">

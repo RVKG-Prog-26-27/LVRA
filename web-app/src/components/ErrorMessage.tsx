@@ -4,7 +4,7 @@ import type { AppErrorCode } from '../recognition/errors';
 
 interface Props {
   code: AppErrorCode;
-  /** Show the "Neizdevās atpazīt tekstu" heading (recognition errors). */
+  /** Show the "Neizdevās atpazīt tekstu" heading (recognition errors) */
   withTitle?: boolean;
   children?: ReactNode;
 }

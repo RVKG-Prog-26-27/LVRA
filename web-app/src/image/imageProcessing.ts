@@ -84,7 +84,7 @@ export function drawRotated(
   ctx.restore();
 }
 
-/** Produces the JPEG (max 1920 x 1080 in its orientation) that is sent for recognition. */
+/** Produces the JPEG (max 1920 x 1080) that is sent for recognition. */
 export async function prepareImageForRecognition(
   image: LoadedImage,
   rotation: Rotation,

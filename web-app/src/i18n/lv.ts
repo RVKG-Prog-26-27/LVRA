@@ -1,6 +1,6 @@
 /**
  * All user-facing texts in Latvian. Keeping them in one file makes wording
- * reviews easy and keeps technical terms out of components.
+ * reviews easy and keeps technical terms out of components
  */
 import type { AppErrorCode } from '../recognition/errors';
 

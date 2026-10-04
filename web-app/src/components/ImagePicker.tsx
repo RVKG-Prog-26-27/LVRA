@@ -10,13 +10,13 @@ interface Props {
 /**
  * Two ways to provide an image. Both use the browser's file input: the
  * camera button adds capture="environment", which opens the rear camera on
- * phones. Permissions are requested by the phone's own system dialog.
+ * phones. Permissions are requested by the phone's own system dialog
  */
 export function ImagePicker({ onFile, disabled }: Props) {
   const libraryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
 
-  // The "cancel" event (user closed the picker without choosing) is not wired by React 18.
+  // The "cancel" event (user closed the picker without choosing) is not wired by React 18
   useEffect(() => {
     const inputs = [libraryRef.current, cameraRef.current].filter(Boolean) as HTMLInputElement[];
     const onCancel = () => onFile(null);
@@ -26,7 +26,7 @@ export function ImagePicker({ onFile, disabled }: Props) {
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
-    event.target.value = ''; // Drop the browser's reference to the file and allow picking the same file again.
+    event.target.value = ''; // Drop the browser's reference to the file and allow picking the same file again
     onFile(file);
   };
 

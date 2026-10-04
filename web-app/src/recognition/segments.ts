@@ -8,7 +8,7 @@ export interface TextSegment {
 /**
  * Splits the recognised text into plain and uncertain parts for highlighting.
  * Words are matched in reading order; a word that cannot be found in the text
- * is skipped, so a mismatch never changes the text itself.
+ * is skipped, so a mismatch never changes the text itself
  */
 export function buildSegments(text: string, words: RecognizedWord[], threshold: number): TextSegment[] {
   const segments: TextSegment[] = [];

@@ -3,14 +3,14 @@ import type { HandwritingRecognitionService, RecognitionResult } from './types';
 
 export interface RecognizeHandwritingOptions {
   timeoutMs: number;
-  /** Aborted when the user presses "Atcelt". */
+  /** Aborted when the user presses "Atcelt" */
   signal?: AbortSignal;
 }
 
 /**
- * The single entry point the UI uses: image in, recognised text out.
+ * The single entry point the UI uses: image in, recognised text out
  * Adds the timeout and cancellation on top of whichever service is active,
- * so every backend gets identical behaviour.
+ * so every backend gets identical behaviour
  */
 export async function recognizeHandwriting(
   service: HandwritingRecognitionService,

@@ -1,7 +1,7 @@
 /**
- * Error codes shared by the image layer and the recognition layer.
+ * Error codes shared by the image layer and the recognition layer
  * The UI maps each code to a plain Latvian message (see src/i18n/lv.ts),
- * so no technical error text ever reaches the user.
+ * so no technical error text ever reaches the user
  */
 export type AppErrorCode =
   // Image input and processing
@@ -30,7 +30,7 @@ export class AppError extends Error {
   }
 }
 
-/** Normalises anything thrown into an AppError. */
+/** Normalises anything thrown into an AppError */
 export function toAppError(error: unknown): AppError {
   if (error instanceof AppError) return error;
   if (error instanceof DOMException && error.name === 'AbortError') return new AppError('CANCELLED');
