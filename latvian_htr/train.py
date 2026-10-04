@@ -25,6 +25,7 @@ from alphabet import NUM_CLASSES, encode
 from dataset import RealHTRDataset, SyntheticHTRDataset, collate_batch
 from model import CRNN
 
+torch.set_num_threads(os.cpu_count())
 
 def build_dataset(real_data_path: str | None, synth_length: int):
     """Собирает «склад» данных для обучения: искусственные примеры + (если есть) настоящие."""
@@ -144,13 +145,13 @@ if __name__ == "__main__":
     # ArgumentParser описывает, какие настройки можно передать при запуске.
     parser = argparse.ArgumentParser()
     parser.add_argument("--steps", type=int, default=2000)         # сколько всего шагов обучения
-    parser.add_argument("--batch-size", type=int, default=32)      # сколько примеров в пачке
+    parser.add_argument("--batch-size", type=int, default=64)      # сколько примеров в пачке
     parser.add_argument("--lr", type=float, default=1e-3)          # скорость обучения (1e-3 = 0.001)
     parser.add_argument("--synth-per-epoch", type=int, default=5000, help="сколько искусственных примеров делать за одну «эпоху» (один круг обучения)")
     parser.add_argument("--real-data", type=str, default=None, help="путь к папке с настоящими сканами (когда они появятся)")
     parser.add_argument("--num-workers", type=int, default=2)      # параллельные помощники для данных
     parser.add_argument("--log-every", type=int, default=20)       # как часто печатать ошибку
-    parser.add_argument("--checkpoint-every", type=int, default=500)  # как часто сохранять веса
+    parser.add_argument("--checkpoint-every", type=int, default=1000)  # как часто сохранять веса
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")  # куда сохранять
     args = parser.parse_args()  # читаем то, что ввёл пользователь
 
