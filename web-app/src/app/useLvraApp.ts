@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import { config } from '../config/config';
 import { loadImageFile, prepareImageForRecognition, type LoadedImage } from '../image/imageProcessing';
-import { createRecognitionService, isMockMode } from '../recognition/createRecognitionService';
+import { createRecognitionService } from '../recognition/createRecognitionService';
 import { toAppError } from '../recognition/errors';
 import { mockSettings } from '../recognition/mockSettings';
 import { recognizeHandwriting } from '../recognition/recognizeHandwriting';
@@ -59,7 +59,7 @@ export function useLvraApp() {
     abortRef.current = controller;
     try {
       const jpeg = await prepareImageForRecognition(image, rotation, config.image);
-      const timeoutMs = (isMockMode && mockSettings.timeoutOverrideMs) || config.recognitionTimeoutMs;
+      const timeoutMs = mockSettings.timeoutOverrideMs || config.recognitionTimeoutMs;
       const result = await recognizeHandwriting(service, jpeg, { timeoutMs, signal: controller.signal });
 
       // Recognition succeeded: delete the image right away, keep only the text.

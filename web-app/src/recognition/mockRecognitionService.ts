@@ -7,7 +7,7 @@
  * visible "demonstration mode" notice, so users are never told it is real.
  *
  * Remove this file (and mockSettings.ts, DevPanel.tsx) once the real model
- * is connected through ApiRecognitionService or another implementation.
+ * is connected.
  */
 import { AppError } from './errors';
 import { mockSettings, type MockSettings } from './mockSettings';
