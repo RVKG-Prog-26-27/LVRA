@@ -1,82 +1,160 @@
 """
-Model architecture - this is the corrected version of the flowchart's "AI" box.
+Архитектура нейросети (её «устройство»). Это самый важный файл проекта.
 
-On the diagram, CNN and BiLSTM were drawn as two independent branches off "AI".
-For text recognition that's not how it works: they're sequential stages of one
-pipeline (a CRNN), plus a CTC layer the diagram was missing entirely:
+Модель называется CRNN: C = Convolutional (свёрточная), RNN = Recurrent
+(рекуррентная). Это стандартная схема для чтения текста с картинки.
+Работает как конвейер из трёх частей, которые идут ОДНА ЗА ДРУГОЙ:
 
-    image -> CNN (visual features, replaces "Līnijas atpazišana" /
-              "Pareiza novietošana" - i.e. stroke patterns + spatial layout)
-          -> reshape rows->sequence
-          -> BiLSTM x2 (context over the sequence, replaces "Vārdu atpazīšana" /
-              "Pieturzīmes" / "Cipari" - i.e. word/punctuation/digit recognition
-              needs context from neighboring characters, which only the LSTM
-              stage gives you)
-          -> Linear classifier over the alphabet
-          -> CTC loss/decoding (aligns variable-length predictions to text
-              without needing per-character bounding boxes)
+    картинка строки
+        |
+        v
+    1) CNN  - «глаза». Смотрит на картинку и находит штрихи, дуги, линии,
+              углы. Превращает картинку в последовательность «описаний»,
+              по одному описанию на каждый узкий вертикальный кусочек
+              (слева направо).
+        |
+        v
+    2) BiLSTM - «память и понимание контекста». Читает эту последовательность
+              и в обе стороны: слева направо И справа налево. Благодаря этому
+              понимает, что буква рядом с другими буквами значит. Например,
+              неразборчивая закорючка между «s» и «l» скорее всего «a».
+        |
+        v
+    3) Linear + CTC - «ответ». Для каждого кусочка выбирает, какая это
+              буква (или «пусто»). CTC - хитрый способ учиться, не размечая,
+              где именно на картинке стоит каждая буква.
 
-CTC is what makes "Teksta zonas atpazīšana????" mostly unnecessary for the
-input side too: you don't need to segment characters up front, just feed
-whole line images in.
+Важно: CTC позволяет подавать на вход целую строку сразу. Не нужно заранее
+разрезать её на отдельные буквы, сеть сама разберётся.
 """
 
-import torch
-import torch.nn as nn
+import torch                 # основная библиотека нейросетей
+import torch.nn as nn        # nn = neural networks: готовые «кирпичики» (слои) для сетей
 
-#ПОТОМ РАЗОБРАТЬСЯ КАК ЭТО РАБОТАЕТ
 class CNNBackbone(nn.Module):
-    """Reduces a [B,1,32,W] line image to a [B,512,1,W'] feature map."""
+    """«Глаза» сети. Уменьшает картинку [B, 1, 32, W] до карты признаков [B, 512, 1, W'].
+
+    Расшифровка размеров (это называется «форма» тензора):
+      B  - batch, сколько картинок обрабатываем одновременно;
+      1  - один канал (картинка серая, не цветная);
+      32 - высота картинки в пикселях;
+      W  - ширина картинки (у каждой своя).
+    На выходе: высота схлопнулась до 1, зато «каналов» стало 512. Это уже не
+    яркость пикселей, а 512 разных «признаков» - ответов на вопросы вроде
+    «здесь есть вертикальная палочка?», «здесь есть закруглённая дуга?».
+    W' - новая, меньшая ширина (примерно W / 4).
+    """
 
     def __init__(self):
+        # Обязательная строка в любой сети PyTorch: подготавливает базовый класс.
         super().__init__()
+        # nn.Sequential - «цепочка»: данные проходят через слои по порядку.
+        #
+        # Что такое слои, которые здесь используются:
+        #  - Conv2d(вход, выход, размер_окна, шаг, отступ) - СВЁРТКА. Маленькое
+        #    «окошко» 3x3 пикселя скользит по всей картинке и в каждом месте
+        #    считает, насколько там видна какая-то фигурка (линия, угол...).
+        #    Окошек много, каждое ищет своё. Сколько окошек - столько
+        #    «каналов» на выходе (64, 128, 256, 512...). Чем глубже слой,
+        #    тем сложнее фигурки: сначала штрихи, потом части букв.
+        #  - ReLU - «выпрямитель»: все отрицательные числа заменяет на 0,
+        #    положительные оставляет. Без таких нелинейных слоёв сеть
+        #    была бы просто одной большой умножалкой и ничего сложного
+        #    выучить не смогла бы. inplace=True - экономим память.
+        #  - MaxPool2d(2, 2) - «сжатие»: из каждого квадрата 2x2 оставляет
+        #    только самое большое число. Картинка уменьшается вдвое по
+        #    высоте и ширине, а самое важное сохраняется.
+        #  - MaxPool2d((2, 1), (2, 1)) - то же, но сжимает только по высоте
+        #    (в 2 раза), а ширину не трогает. Ширина нам нужна, ведь по ней
+        #    мы будем «читать» текст слева направо!
+        #  - BatchNorm2d - «нормализация»: приводит числа к удобному
+        #    масштабу, чтобы обучение шло быстрее и стабильнее.
         self.net = nn.Sequential(
+            # Блок 1: 1 канал -> 64 канала. Потом сжатие вдвое.
             nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),      # 32x W -> 16 x W/2
+            # Блок 2: 64 -> 128 каналов. Снова сжатие вдвое.
             nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),    # -> 8 x W/4
+            # Блок 3: две свёртки подряд (128 -> 256 -> 256), потом сжатие ТОЛЬКО по высоте.
             nn.Conv2d(128, 256, 3, 1, 1), nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),  # -> 4 x W/4
+            # Блок 4: 256 -> 512 -> 512 каналов с нормализацией, снова сжатие только по высоте.
             nn.Conv2d(256, 512, 3, 1, 1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, 3, 1, 1), nn.BatchNorm2d(512), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),  # -> 2 x W/4
+            # Последняя свёртка с окном 2x2 без отступа: «съедает» оставшиеся 2 строки высоты
+            # в одну. Теперь высота = 1, а ширина стала на 1 меньше.
             nn.Conv2d(512, 512, 2, 1, 0), nn.ReLU(inplace=True),  # -> 1 x (W/4 - 1)
         )
 
     def forward(self, x):
+        # forward - «прямой проход»: что делает слой, когда ему дали данные.
+        # Просто прогоняем картинку через всю цепочку выше.
         return self.net(x)
 
 
 class BiLSTMHead(nn.Module):
+    """«Голова» сети: читает последовательность признаков и выдаёт вероятности букв.
+
+    LSTM - это тип слоя с «памятью». Он читает данные по порядку, шаг за
+    шагом, и помнит, что было раньше. Для текста это важно: чтобы понять
+    букву, нужно видеть соседние. «Bi» (bidirectional) значит «двунаправленный»:
+    два LSTM, один читает слева направо, другой справа налево, а результаты
+    склеиваются. Так каждая позиция знает и что было до неё, и что будет после.
+    """
+
     def __init__(self, in_dim: int, hidden: int, num_classes: int, num_layers: int = 2):
         super().__init__()
+        # in_dim - сколько чисел описывают один кусочек картинки (у нас 512);
+        # hidden - размер «памяти» LSTM (сколько чисел он держит в голове);
+        # num_layers=2 - два LSTM, поставленные друг на друга: второй читает
+        #   результат первого и понимает ещё глубже;
+        # bidirectional=True - включаем чтение в обе стороны;
+        # batch_first=False - порядок измерений данных: [шаг, картинка в пачке, признаки].
         self.lstm = nn.LSTM(
             in_dim, hidden, num_layers=num_layers, bidirectional=True, batch_first=False
         )
+        # Linear - обычный «полносвязный» слой: берёт числа от LSTM и превращает
+        # их в оценки для каждого символа алфавита. Вход hidden * 2, потому что
+        # два направления склеились (каждое даёт по hidden чисел).
         self.fc = nn.Linear(hidden * 2, num_classes)
 
     def forward(self, x):
         # x: [T, B, in_dim]
-        out, _ = self.lstm(x)
-        return self.fc(out)  # [T, B, num_classes]
+        # T - сколько «кусочков» картинки по горизонтали (шагов по времени),
+        # B - сколько картинок в пачке,
+        # in_dim - сколько признаков описывают один кусочек.
+        out, _ = self.lstm(x)   # out - то, что LSTM «понял» на каждом шаге ("_" - память, она нам не нужна)
+        return self.fc(out)     # [T, B, num_classes]: оценки каждого символа для каждого шага
 
 
 class CRNN(nn.Module):
+    """Вся модель целиком: «глаза» (CNN) + «понимание» (BiLSTM)."""
+
     def __init__(self, num_classes: int, lstm_hidden: int = 256):
         super().__init__()
-        self.cnn = CNNBackbone()
+        self.cnn = CNNBackbone()  # глаза
+        # Голова: на вход приходит 512 признаков (столько каналов у CNN на выходе),
+        # на выходе - num_classes оценок (по числу символов в алфавите, включая blank).
         self.rnn = BiLSTMHead(in_dim=512, hidden=lstm_hidden, num_classes=num_classes)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """
-        images: [B, 1, 32, W]
-        returns log-probs: [T, B, num_classes], T = sequence length after CNN downsampling
+        images: [B, 1, 32, W] - пачка картинок строк.
+        Возвращает логарифмы вероятностей формы [T, B, num_classes],
+        где T - длина последовательности после того, как CNN сжал картинку по ширине.
         """
-        feats = self.cnn(images)              # [B, 512, 1, W']
-        feats = feats.squeeze(2)               # [B, 512, W']
-        feats = feats.permute(2, 0, 1)         # [W'(=T), B, 512]
-        logits = self.rnn(feats)               # [T, B, num_classes]
+        feats = self.cnn(images)              # [B, 512, 1, W']  - CNN нашёл признаки
+        feats = feats.squeeze(2)              # [B, 512, W']     - убираем лишнее измерение высоты (оно равно 1)
+        # permute переставляет измерения местами: было [картинка, признаки, шаг],
+        # нужно [шаг, картинка, признаки] - именно так LSTM ждёт данные.
+        feats = feats.permute(2, 0, 1)        # [W'(=T), B, 512]
+        logits = self.rnn(feats)              # [T, B, num_classes]  - оценки символов
+        # log_softmax превращает оценки в логарифмы вероятностей (в сумме 100% по
+        # символам на каждом шаге). Именно в таком виде их хочет функция потерь CTC.
         return logits.log_softmax(dim=2)
 
     def output_length(self, input_width: int) -> int:
-        """Sequence length T the CNN produces for a given input image width (for CTC input_lengths)."""
-        w = input_width // 2 // 2  # two stride-2 pools
-        w = w - 1                  # final kernel=2,stride=1,pad=0 conv
+        """Сколько шагов T получится на выходе CNN для картинки заданной ширины (нужно CTC)."""
+        w = input_width // 2 // 2  # два сжатия MaxPool(2,2) уменьшили ширину вчетверо
+        w = w - 1                  # последняя свёртка с окном 2 съела ещё один столбец
+        # max(w, 1) - гарантируем, что результат не меньше 1 (даже для очень узкой картинки).
         return max(w, 1)
