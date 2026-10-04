@@ -1,4 +1,4 @@
-# Latviešu rokrakstu atpazīšana — sākotnējā versija_02
+# Latviešu rokrakstu atpazīšana — alpha versija_02
 
 Sākotnējā (baseline) implementācija pēc tavas blokshēmas. **AI bloks blokshēmā bija uzzīmēts nepareizi** — CNN un BiLSTM tur izskatās pēc diviem neatkarīgiem zariem, bet praksē tā strādāt nevar. Reālajā arhitektūrā (CRNN, standarts rokraksta/OCR atpazīšanai) tie ir **secīgi** posmi + trūkst CTC slāņa, kas savieno tīkla izvadi ar mainīga garuma tekstu:
 
