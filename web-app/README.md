@@ -1,11 +1,10 @@
-<<<<<<< HEAD
 # LVRA, Latvijas Valodas Rokraksta Atpazīšana
 
-A responsive web app (phone first) that turns a photo of handwritten Latvian text into ordinary digital text the user can read, correct and copy. Made by the Slepie team.
+A responsive web app (phone first) that turns a photo of handwritten Latvian text into digital text the user can read, correct and copy. Made by the Slepie team.
 
-The user interface is entirely in Latvian. This documentation is in English for developers.
+The user interface is entirely in Latvian. This documentation is in English for developers only.
 
-> **Status:** the handwriting recognition model is not finished. The app currently runs with a **temporary mock service** that returns a fixed Latvian sample text. While the mock is active, users see a visible "Demonstrācijas režīms" notice, so the sample is never presented as real recognition.
+> **Status:** the handwriting recognition model is not finished. The app currently runs with a **temporary mock service** that returns a fixed Latvian sample text. While the mock is active, users see a visible "Demonstrācijas režīms" notice.
 
 ## User flow
 
@@ -17,7 +16,7 @@ The user interface is entirely in Latvian. This documentation is in English for 
 6. **Kopēt tekstu** copies the text and shows **Teksts nokopēts!**
 7. After successful recognition the image is deleted from memory; only the text remains. After a failure the image is kept so the user can press **Mēģināt vēlreiz**.
 
-## Running it on your computer
+## SET UP
 
 ### 1. Install Node.js (one time)
 
@@ -175,6 +174,3 @@ docs/API.md             contract for the recognition server
 - Very large photos (tens of megapixels) may fail to open on older phones with little memory; the user then sees a message to try another image.
 - HEIC photos open only in browsers that support HEIC (mainly Safari). Other browsers show the JPEG or PNG message.
 - Undo (Ctrl+Z) may not undo line breaks and pastes in the result editor, because these are inserted as plain text by the app.
-=======
-# LVRA
->>>>>>> 2dba99254eac5fc104c7b2fba6fad84de97fd166
