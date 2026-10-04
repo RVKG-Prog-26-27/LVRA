@@ -3,32 +3,32 @@
  *
  * The UI only ever talks to HandwritingRecognitionService. To plug in the real
  * model, write a new class that implements this interface and select it in
- * createRecognitionService.ts.
+ * createRecognitionService.ts
  */
 
 export interface RecognizedWord {
-  /** The word exactly as it appears in RecognitionResult.text. */
+  /** The word exactly as it appears in RecognitionResult.text */
   text: string;
-  /** Model confidence between 0 and 1. */
+  /** Model confidence between 0 and 1 */
   confidence: number;
 }
 
 export interface RecognitionResult {
-  /** Recognised text with line breaks preserved ("\n"). Not spell-corrected. */
+  /** Recognised text with line breaks preserved ("\n"); Not spell-corrected */
   text: string;
-  /** Optional per-word confidence, in reading order. Used to highlight uncertain words. */
+  /** Optional per-word confidence, in reading order - used to highlight uncertain words */
   words: RecognizedWord[];
 }
 
 export interface RecognizeOptions {
-  /** Aborted when the user cancels or the timeout is reached. */
+  /** Aborted when the user cancels or the timeout is reached */
   signal: AbortSignal;
 }
 
 export interface HandwritingRecognitionService {
   /**
-   * Recognises handwritten Latvian text in a JPEG image.
-   * Must reject with an AppError (see errors.ts) on failure.
+   * Recognises handwritten Latvian text in a JPEG image
+   * Must reject with an AppError (see errors.ts) on failure4
    */
   recognize(image: Blob, options: RecognizeOptions): Promise<RecognitionResult>;
 }

@@ -1,3 +1,5 @@
+// starts the programm, connects react to the page
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';

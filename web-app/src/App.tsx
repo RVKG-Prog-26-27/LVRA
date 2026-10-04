@@ -1,3 +1,5 @@
+//builds every screen of the app itself
+
 import { useMemo, useState } from 'react';
 import { useLvraApp } from './app/useLvraApp';
 import { DevPanel } from './components/DevPanel';
@@ -15,6 +17,7 @@ export default function App() {
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const showDevPanel = useMemo(() => new URLSearchParams(window.location.search).get('dev') === '1', []);
 
+  //static - doesn't depend on the current state of the screen
   return (
     <div className="page">
       <header className="masthead">
@@ -44,12 +47,15 @@ export default function App() {
           </>
         )}
 
+        // loading screen - short message
         {state.step === 'loading' && (
           <p className="muted" role="status" aria-live="polite">
             {lv.loadingImage}
           </p>
         )}
 
+
+        //preview and recognition screen - progress state and "Atcelt"
         {(state.step === 'preview' || state.step === 'recognizing') && (
           <>
             <h2>{lv.previewTitle}</h2>
@@ -57,7 +63,9 @@ export default function App() {
               <ImagePreview image={state.image} rotation={state.rotation} busy={state.step === 'recognizing'} />
               {state.step === 'recognizing' && <ProcessingStatus onCancel={cancel} />}
             </div>
+            
 
+            //preview screen -- 2 buttons
             {state.step === 'preview' && (
               <>
                 <p className="muted">{lv.previewHint}</p>
@@ -72,6 +80,8 @@ export default function App() {
                   </button>
                 </div>
 
+
+                //errors - displays all error types
                 {state.error ? (
                   <ErrorMessage code={state.error} withTitle>
                     <button type="button" className="btn btn-primary" onClick={recognize}>
@@ -96,6 +106,8 @@ export default function App() {
           </>
         )}
 
+
+        //result screen - text aditor
         {state.step === 'result' && <ResultEditor segments={state.segments} onStartOver={reset} />}
       </main>
 

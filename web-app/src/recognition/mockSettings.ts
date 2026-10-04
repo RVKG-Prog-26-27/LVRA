@@ -1,7 +1,7 @@
 /**
- * TEMPORARY, for development only.
+ * TEMPORARY
  * Settings for the mock recognition service, changed from the developer
- * panel (open the app with ?dev=1). Delete together with the mock.
+ * panel (open the app with ?dev=1). Delete together with the mock
  */
 
 export type MockScenario =
@@ -16,9 +16,9 @@ export type MockScenario =
 
 export interface MockSettings {
   scenario: MockScenario;
-  /** Simulated processing time. */
+  /** Simulated processing time */
   delayMs: number;
-  /** When set, overrides the normal 60 s timeout so the timeout error can be tested quickly. */
+  /** When set, overrides the normal 60 s timeout so the timeout error can be tested quickly */
   timeoutOverrideMs: number | null;
 }
 
