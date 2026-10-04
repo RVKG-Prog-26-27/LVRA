@@ -14,34 +14,27 @@ import torch
 LATVIAN_LETTERS = "aābcčdeēfgģhiījkķlļmnņoprsštuūvzž"
 BASE_LATIN = "qwxy"
 DIGITS = "0123456789"
-<<<<<<< HEAD
 
-# Знаки препинания и пробел (пробел тоже символ! Он стоит в самом начале строки).
-# Символ \" внутри строки записан с обратным слэшем, чтобы Python не решил,
-# что строка закончилась.
+# Pieturzīmes un atstarpe (atstarpe arī ir simbols! Tas atrodas pašā rindas sākumā).
+# Rakstzīme \" virknē tiek rakstīta ar atpakaļvērstās slīpsvītru, lai Python nevarētu pieņemt lēmumu
+# ka līnija ir beigusies.
 PUNCT = (
-    " .,!?-:;()\"'/"                        # базовая пунктуация
-    + "\u201e\u201c\u201d\u2018\u2019"       # „ " " ' '  (латышские/изогнутые кавычки)
-    + "\u2013\u2014"                        # – — (короткое и длинное тире)
-    + "[]{}"                                 # скобки
-    + "«»"                                   # ёлочки
-    + "*_+=<>@#%&^~|\\"                      # символы
-    + "\u2026"                               # … многоточие
-    + "\u2116"                               # № (номерной знак)
-    + "€$"                                   # валюта
+    " .,!?-:;()\"'/"                        # pamata pieturzīmes
+    + "\u201e\u201c\u201d\u2018\u2019"       # „ " " ' ' (latviešu/izliektas pēdiņas)
+    + "\u2013\u2014"                         # – – (defise en un em)
+    + "[]{}"                                 # iekavas 
+    + "«»"                                   # eglītes
+    + "*_+=<>@#%&^~|\\"                      # simboli
+    + "\u2026"                               # … 
+    + "\u2116"                               # № 
+    + "€$"                                   # valūta 
 )
 
-
-# Собираем всё вместе в один список:
-#  - LATVIAN_LETTERS.upper() даёт заглавные версии букв (A, Ā, B, ...);
-#  - set(...) убирает повторы (если какая-то буква попала дважды);
-#  - sorted(...) выстраивает символы по порядку, чтобы номера всегда
-#    получались одинаковыми при каждом запуске программы.
-=======
-PUNCT = " .,!?-:;()\"'/"
-# Viens saraksts:
-#  - sorted(...) nosaka secību, lai numuri vienmēr būtu vienādi.
->>>>>>> e190ff6678718620cb007d83cf822d4a60364f73
+# Salieciet visu vienā sarakstā:
+# - LATVIEŠU_BURTI.upper() dod lielo burtu versijas (A, Ā, B, ...);
+# - set(...) noņem atkārtojumus (ja kāds burts parādās divreiz);
+# - sakārtots(...) sakārto rakstzīmes tā, lai cipari vienmēr būtu
+# izrādījās vienādi katru reizi, kad programma tika palaista.
 CHARS = sorted(set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + PUNCT))
 
 BLANK = "<blank>"
