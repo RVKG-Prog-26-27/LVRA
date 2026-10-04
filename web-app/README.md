@@ -77,10 +77,6 @@ Errors from every layer use one set of codes (`src/recognition/errors.ts`). The 
 
 Fixed product values (60 s timeout, 70% confidence threshold, 1920 x 1080 limit, JPEG quality, privacy contact email) are in `src/config/config.ts`.
 
-## Privacy
-
-The browser keeps the image only in memory. It is never written to local storage, cookies or disk, and it is released right after successful recognition. The app uses no cookies, analytics, ads or third-party fonts.
-
 ## Known limitations
 
 - The mock ignores the image content and always returns the same sample text.
