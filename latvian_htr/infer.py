@@ -1,12 +1,7 @@
 """
-Распознавание (инференс): берём готовую обученную сеть и читаем текст с картинки.
+Atpazīšana (secināšana): mēs ņemam jau apmācītu tīklu un nolasām tekstu no attēla.
 
-Как запускать:
-    python infer.py --checkpoint checkpoints/crnn_step2000.pt --image samples/sample_0.png --beam-width 5
-
-Это финал всей цепочки: «картинка -> сеть выдаёт числа -> числа превращаются
-в буквы (CTC-декодирование) -> печатаем готовый текст».
-Слово «инференс» просто значит «использование уже обученной модели».
+Šis ir pēdējais solis visā ķēdē: "attēls -> tīkls izvada skaitļus -> skaitļi tiek pārveidoti burtos (CTC dekodēšana) -> izdrukā gatavo tekstu."
 """
 
 import argparse
@@ -21,50 +16,48 @@ from synthetic_data import TARGET_HEIGHT
 
 
 def load_image(path: str) -> torch.Tensor:
-    """Открывает файл с картинкой и готовит его для сети (так же, как при обучении)."""
-    # Открываем и переводим в оттенки серого.
+    """Atver attēla failu un sagatavo to tīmekļa pārlūkošanai (tāpat kā apmācības laikā)."""
+    # Atveram attēlu un pārveidojam to pelēktoņu attēlā.
     img = Image.open(path).convert("L")
     w, h = img.size
-    # Приводим высоту к 32 пикселям, ширину меняем пропорционально.
+    # Samazinām vai palielinām augstumu līdz 32 pikseļiem, platumu mainām proporcionāli.
     new_w = max(1, int(w * (TARGET_HEIGHT / h)))
     img = img.resize((new_w, TARGET_HEIGHT), Image.BILINEAR)
-    # Превращаем в тензор [1, 32, W] и добавляем ещё одно измерение спереди -
-    # «пачку из одной картинки». Сеть всегда ждёт пачку, даже если картинка одна.
-    return image_to_tensor(img).unsqueeze(0)  # [1,1,H,W]
+    # Pārveidojam par tenzoru [1, 32, W] un priekšā pievienojam vēl vienu dimensiju -
+    # «pakešu ar vienu attēlu». Tīkls vienmēr sagaida pakešu, pat ja attēls ir tikai viens.
+    return image_to_tensor(img).unsqueeze(0) 
 
 
 def predict(model: CRNN, image_tensor: torch.Tensor, device: torch.device, beam_width: int = 5) -> str:
-    """Прогоняет картинку через сеть и возвращает распознанный текст."""
-    model.eval()  # режим «проверки» (не обучения): слои ведут себя стабильно
-    # no_grad говорит: «ничего не запоминай для обучения». Экономит память и время,
-    # ведь мы сейчас только читаем, а не учимся.
+    """Palaiž attēlu tīklā un atgriež atpazīto tekstu.."""
+    model.eval()  # «novērtēšanas» režīms (nevis apmācības): slāņi darbojas stabilā režīmā
+    # no_grad nozīmē «neuzkrāj informāciju apmācībai». Tas ietaupa atmiņu un laiku,
     with torch.no_grad():
-        log_probs = model(image_tensor.to(device))  # [T,1,C] - вероятности символов на каждом шаге
-        # Для одной картинки убираем измерение batch: [T, 1, C] -> [T, C].
-        # Вместо argmax/greedy держим несколько лучших CTC-префиксов.
+        log_probs = model(image_tensor.to(device))  # [T,1,C] - simbolu varbūtības katrā solī
+        # Vienam attēlam noņemam batch dimensiju: [T, 1, C] -> [T, C].
+        # saglabājam vairākus labākos CTC prefiksus.
         sequence_log_probs = log_probs.squeeze(1)  # [T, C]
     return decode_beam_search(sequence_log_probs, beam_width=beam_width)
 
 
-# Запускается только при прямом вызове файла («python infer.py ...»).
+# Izpildās tikai tad, ja fails tiek palaists tieši («python infer.py ...»).
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # required=True - без этих двух параметров программа не запустится.
-    parser.add_argument("--checkpoint", type=str, required=True)  # путь к файлу с весами сети
-    parser.add_argument("--image", type=str, required=True)       # путь к картинке для чтения
+    # required=True - bez šiem diviem parametriem programma nepalaižas.
+    parser.add_argument("--checkpoint", type=str, required=True)  # ceļš uz tīkla svaru failu
+    parser.add_argument("--image", type=str, required=True)       # ceļš uz nolasāmo attēlu
     parser.add_argument("--beam-width", type=int, default=5,
-                        help="размер beam для CTC beam search (по умолчанию 5)")
+                        help="size beam for CTC beam search (5)")
     args = parser.parse_args()
 
-    # Выбираем видеокарту, если она есть, иначе процессор.
+    # Izvēlamies videokarti, ja tā ir pieejama, pretējā gadījumā procesoru.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Создаём пустую сеть нужного устройства...
+    # Izveidojam tukšu tīklu izvēlētajai ierīcei...
     model = CRNN(num_classes=NUM_CLASSES).to(device)
-    # ...и загружаем в неё сохранённые веса. map_location говорит, куда их положить
-    # (это нужно, если учили на видеокарте, а читаем на процессоре).
+    # ...un ielādējam tajā saglabātos svarus. map_location norāda, kur tos ievietot.
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
     image_tensor = load_image(args.image)
     text = predict(model, image_tensor, device, beam_width=args.beam_width)
-    # !r печатает строку «как в коде» - в кавычках, так видно пробелы по краям.
-    print(f"Распознанный текст: {text!r}")
+    # !r izdrukā virkni «kā kodā» - pēdiņās, tāpēc ir redzamas arī atstarpes malās.
+    print(f"Teksts: {text!r}")

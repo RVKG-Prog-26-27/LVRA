@@ -1,13 +1,11 @@
 /**
- * TEMPORARY MOCK. NOT THE REAL AI MODEL.
+ * TEMPORARY MOCK
  *
  * Stands in for the unfinished handwriting recognition model so the rest of
  * the app can be built and tested. It ignores the image content and returns
  * a fixed Latvian sample text. While this service is active the UI shows a
- * visible "demonstration mode" notice, so users are never told it is real.
+ * visible "demonstration mode" notice, so users are never told it is real
  *
- * Remove this file (and mockSettings.ts, DevPanel.tsx) once the real model
- * is connected.
  */
 import { AppError } from './errors';
 import { mockSettings, type MockSettings } from './mockSettings';
@@ -16,7 +14,7 @@ import type { HandwritingRecognitionService, RecognitionResult, RecognizeOptions
 export const MOCK_SAMPLE_TEXT =
   'Šodien no rīta devos uz tirgu.\nNopirku maizi, pienu un ābolus.\nVakarā ciemos atbrauks vecmāmiņa.';
 
-const UNCERTAIN_WORDS: Record<string, number> = { tirgu: 0.62, ābolus: 0.55, vecmāmiņa: 0.68 };
+const UNCERTAIN_WORDS: Record<string, number> = { devos: 0.62, ābolus: 0.55, vecmāmiņa: 0.68 };
 
 function buildWords(text: string, allConfident: boolean) {
   return (text.match(/[\p{L}\p{N}]+/gu) ?? []).map((word) => ({
@@ -58,7 +56,7 @@ export class MockRecognitionService implements HandwritingRecognitionService {
               });
               return;
             case 'hang':
-              // Never settles; the caller's timeout or cancel ends the attempt.
+              // Never settles; the caller's timeout or cancel ends the attempt
               signal.addEventListener('abort', onAbort, { once: true });
               return;
             default:

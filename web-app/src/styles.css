@@ -1,9 +1,6 @@
 /*
-  LVRA visual system
-  Idea: the work area is a Latvian school exercise book ("rūtiņu burtnīca"):
-  a light blue square grid with a red margin line. The result text sits on
-  ruled lines. Everything else stays quiet. System fonts only, so no
-  third-party font requests leave the user's browser.
+  websites visual part, idea of the text book where the 
+  image is located
 */
 
 :root {

@@ -53,7 +53,7 @@ export async function loadImageFile(file: File | null | undefined): Promise<Load
   }
 }
 
-/** Draws the image rotated and scaled to fit maxLong x maxShort onto the given canvas. */
+/** Draws the image - rotated and scaled to fit maxLong x maxShort onto the canvas */
 export function drawRotated(
   canvas: HTMLCanvasElement,
   image: LoadedImage,
@@ -73,7 +73,7 @@ export function drawRotated(
   const drawWidth = swap ? target.height : target.width;
   const drawHeight = swap ? target.width : target.height;
 
-  ctx.fillStyle = '#ffffff'; // JPEG has no transparency; use white paper behind transparent PNGs.
+  ctx.fillStyle = '#ffffff'; // draws background to PNG without one
   ctx.fillRect(0, 0, target.width, target.height);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
