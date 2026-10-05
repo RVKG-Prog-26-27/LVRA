@@ -182,6 +182,6 @@ def generate_batch(n: int, corpus: list[str] | None = None) -> list[tuple[Image.
 
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)
-    for i, (img, text) in enumerate(generate_batch(10000)):
+    for i, (img, text) in enumerate(generate_batch(10)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")
