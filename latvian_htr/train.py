@@ -149,8 +149,8 @@ if __name__ == "__main__":
     parser.add_argument("--synth-per-epoch", type=int, default=5000, help="how many artificial examples to make in one “epoch” (one round of training)")
     parser.add_argument("--real-data", type=str, default=None, help="path to the folder with real scans (when they appear)")
     parser.add_argument("--num-workers", type=int, default=2)      # parallel data helpers
-    parser.add_argument("--log-every", type=int, default=20)       # how often to print an error
-    parser.add_argument("--checkpoint-every", type=int, default=1000)  # how often save weights
+    parser.add_argument("--log-every", type=int, default=1)       # how often to print an error
+    parser.add_argument("--checkpoint-every", type=int, default=500)  # how often save weights
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")  # where to save 
     args = parser.parse_args()  # read what user inputs
 
