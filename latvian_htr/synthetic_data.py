@@ -68,12 +68,12 @@ def _default_corpus() -> list[str]:
 
 A4_WIDTH_MM = 210
 A4_MARGIN_MM = 20  # per side
-REFERENCE_DPI = 96
+REFERENCE_DPI = 96 
 REFERENCE_FONT_SIZE = 33  # middle of the 26-40 range used in render_text_line
 
 
 def _a4_usable_width_px(font_size: int = REFERENCE_FONT_SIZE, dpi: float | None = None) -> int:
-    dpi = dpi if dpi is not None else 96 * random.uniform(1.5, 2)
+    dpi = dpi if dpi is not None else 96/3 * random.uniform(1.5, 2)
     usable_mm = A4_WIDTH_MM - 2 * A4_MARGIN_MM
     return int(usable_mm / 25.4 * dpi * (font_size / REFERENCE_FONT_SIZE))
 
@@ -100,10 +100,13 @@ def _wrap_line_to_a4(text: str, font: ImageFont.FreeTypeFont) -> list[str]:
         lines.append(current)
     return lines
 
+def random_text(words, n_min=1, n_max=8):
+    return " ".join(random.choices(words, k=random.randint(n_min, n_max)))
 
 def load_corpus() -> list[str]:
     corpus_path = os.path.join(os.path.dirname(__file__), "data", "corpus.txt")
     if os.path.exists(corpus_path):
+        random_text(corpus_path)
         with open(corpus_path, encoding="utf-8") as f:
             raw_lines = [ln.strip() for ln in f if ln.strip()]
         if raw_lines:
@@ -182,6 +185,6 @@ def generate_batch(n: int, corpus: list[str] | None = None) -> list[tuple[Image.
 
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)
-    for i, (img, text) in enumerate(generate_batch(10)):
+    for i, (img, text) in enumerate(generate_batch(8)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")

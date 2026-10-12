@@ -36,7 +36,26 @@ def build_dataset(real_data_path: str | None, synth_length: int):
     # Ja datu kopa ir viena, atgriežam to; ja ir divas, apvienojam vienā (ConcatDataset).
     return datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
 
+class PlateauScheduler:
+    """Уменьшает lr, если средний loss перестал улучшаться."""
 
+    def __init__(self, optimizer, every=200, factor=0.5, patience=3, min_lr=1e-6):
+        self.optimizer = optimizer
+        self.every = every  # как часто (в шагах) проверять loss
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=factor, patience=patience, min_lr=min_lr
+        )
+        self.total, self.count = 0.0, 0
+
+    def update(self, step, loss_value):
+        self.total += loss_value
+        self.count += 1
+        if step % self.every == 0:
+            avg = self.total / self.count
+            self.scheduler.step(avg)
+            lr = self.optimizer.param_groups[0]["lr"]
+            print(f"[scheduler] step {step}: avg loss={avg:.4f}, lr={lr:.2e}")
+            self.total, self.count = 0.0, 0
 def train(args):
     """Galvenā apmācības funkcija. args ir lietotāja nodotie iestatījumi."""
     # Izvēlamies, ar ko veikt aprēķinus: videokarte (cuda) ir desmitiem reižu ātrāka par procesoru (cpu).
@@ -65,6 +84,7 @@ def train(args):
     # CTCLoss - funkcija, kas aprēķina kļūdu mainīga garuma tekstam
     # (blank=0 - «tukšā» simbola numurs). zero_infinity=True neļauj apmācībai
     # sabojāties, ja kādam piemēram kļūda pēkšņi kļūst bezgalīga.
+    plateau = PlateauScheduler(optimizer)
     ctc_loss = torch.nn.CTCLoss(blank=0, zero_infinity=True)
 
     # Mape saglabātajiem failiem. exist_ok=True: ja mape jau pastāv, viss ir kārtībā.
@@ -110,7 +130,9 @@ def train(args):
                     f"input_lengths bigger than T: "
                     f"max(input_lengths)={input_lengths.max().item()}, T={T}"
                 )
-
+            bad = (input_lengths < target_lengths).sum().item()
+            if bad:
+                print(f"WARNING: {bad}/{len(texts)} примеров с T < длины текста (loss обнулён)")
             # Aprēķinām kļūdu: cik ļoti tīkla prognoze atšķiras no pareizā teksta.
             loss = ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
@@ -122,6 +144,7 @@ def train(args):
             optimizer.step()        # 3) pielietojam korekcijas - tīkls ir kļuvis nedaudz gudrāks
 
             step += 1
+            plateau.update(step, loss.item())
             # Ik pēc log_every soļiem izdrukājam pašreizējo kļūdu. Tai pakāpeniski jāsamazinās.
             if step % args.log_every == 0:
                 print(f"{step}/{args.steps}  failure={loss.item():.4f}")
