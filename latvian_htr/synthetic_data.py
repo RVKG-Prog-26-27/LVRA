@@ -73,7 +73,7 @@ REFERENCE_FONT_SIZE = 33  # middle of the 26-40 range used in render_text_line
 
 
 def _a4_usable_width_px(font_size: int = REFERENCE_FONT_SIZE, dpi: float | None = None) -> int:
-    dpi = dpi if dpi is not None else 96/3 * random.uniform(1.5, 2)
+    dpi = dpi if dpi is not None else 96 * random.uniform(1.5, 2)
     usable_mm = A4_WIDTH_MM - 2 * A4_MARGIN_MM
     return int(usable_mm / 25.4 * dpi * (font_size / REFERENCE_FONT_SIZE))
 
@@ -185,6 +185,6 @@ def generate_batch(n: int, corpus: list[str] | None = None) -> list[tuple[Image.
 
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)
-    for i, (img, text) in enumerate(generate_batch(8)):
+    for i, (img, text) in enumerate(generate_batch(10000)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")

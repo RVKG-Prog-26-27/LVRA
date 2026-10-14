@@ -95,6 +95,7 @@ Attēla platums tiek pielāgots platākajam attēlam.
     """
     # batch ir pāru (attēls, teksts) saraksts. zip(*batch) to «izjauc»
     # divos sarakstos: visus attēlus atsevišķi un visus tekstus atsevišķi.
+    
     imgs, texts = zip(*batch)
     # Lielākais platums starp attēliem.
     max_w = max(img.shape[-1] for img in imgs)

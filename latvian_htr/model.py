@@ -49,9 +49,9 @@ class CNNBackbone(nn.Module):
         # mērogam, lai apmācība notiktu ātrāk un stabilāk.
         self.net = nn.Sequential(
             # 1. bloks: 1 kanāls -> 64 kanāli. Pēc tam saspiešana divreiz.
-            nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),      # 32x W -> 16 x W/2
+            nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2,1),(2,1)),      # 32x W -> 16 x W/2
             # 2. bloks: 64 -> 128 kanāli. Atkal saspiešana divreiz.
-            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),    # -> 8 x W/4
+            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2,1),(2,1)),    # -> 8 x W/4
             # 3. bloks: divas konvolūcijas pēc kārtas (128 -> 256 -> 256), pēc tam saspiešana TIKAI pēc augstuma.
             nn.Conv2d(128, 256, 3, 1, 1), nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),  # -> 4 x W/4
@@ -132,7 +132,7 @@ class CRNN(nn.Module):
 
     def output_length(self, input_width: int) -> int:
         """Cik soļus T tiks iegūts CNN izvadē attēlam ar noteiktu platumu (nepieciešams CTC)?"""
-        w = input_width // 2 // 2  # divas MaxPool(2,2) saspiešanas samazināja platumu četras reizes
+        w = input_width // 2   # divas MaxPool(2,2) saspiešanas samazināja platumu četras reizes
         w = w - 1                  # pēdējā konvolūcija ar 2 izmēra logu noņēma vēl vienu kolonnu
         # max(w, 1) - garantējam, ka rezultāts nav mazāks par 1 (arī ļoti šauram attēlam).
         return max(w, 1)

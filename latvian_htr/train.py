@@ -72,10 +72,14 @@ def train(args):
     loader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=True,
         collate_fn=collate_batch, num_workers=args.num_workers,
+        timeout=120 if args.num_workers > 0 else 0,
     )
 
     # Izveidojam pašu tīklu un pārvietojam to uz izvēlēto ierīci (.to(device)).
     model = CRNN(num_classes=NUM_CLASSES).to(device)
+    if args.resume:
+        model.load_state_dict(torch.load(args.resume, map_location=device))
+        print(f"Загружен чекпоинт: {args.resume}")
     # Optimizators - «labotājs»: tas zina, kā mainīt tīkla svarus, lai
     # kļūda samazinātos. Adam ir populārs un uzticams variants.
     # lr (learning rate) - «mācīšanās ātrums»: cik lieliem soļiem mainīt svarus.
@@ -166,15 +170,16 @@ def train(args):
 if __name__ == "__main__":
     # ArgumentParser apraksta, kādus iestatījumus var nodot palaišanas laikā.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--steps", type=int, default=2000)         # learning steps
+    parser.add_argument("--steps", type=int, default=20000)         # learning steps
     parser.add_argument("--batch-size", type=int, default=64)      # examples in one step
     parser.add_argument("--lr", type=float, default=1e-3)          # the speed of learning (1e-3 = 0.001)
     parser.add_argument("--synth-per-epoch", type=int, default=5000, help="how many artificial examples to make in one “epoch” (one round of training)")
     parser.add_argument("--real-data", type=str, default=None, help="path to the folder with real scans (when they appear)")
     parser.add_argument("--num-workers", type=int, default=2)      # parallel data helpers
-    parser.add_argument("--log-every", type=int, default=1)       # how often to print an error
-    parser.add_argument("--checkpoint-every", type=int, default=500)  # how often save weights
+    parser.add_argument("--log-every", type=int, default=500)       # how often to print an error
+    parser.add_argument("--checkpoint-every", type=int, default=1000)  # how often save weights
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")  # where to save 
+    parser.add_argument("--resume", type=str, default=None, help="чекпоинт для дообучения")
     args = parser.parse_args()  # read what user inputs
 
     # Fiksējam «nejaušību» ar skaitli 0, lai palaišanu varētu atkārtot ar tādu pašu rezultātu.
