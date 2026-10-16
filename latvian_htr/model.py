@@ -48,19 +48,19 @@ class CNNBackbone(nn.Module):
         # - BatchNorm2d - «normalizācija»: pielāgo skaitļus ērtam
         # mērogam, lai apmācība notiktu ātrāk un stabilāk.
         self.net = nn.Sequential(
-            # 1. bloks: 1 kanāls -> 64 kanāli. Pēc tam saspiešana divreiz.
-            nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2,1),(2,1)),      # 32x W -> 16 x W/2
-            # 2. bloks: 64 -> 128 kanāli. Atkal saspiešana divreiz.
-            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2,1),(2,1)),    # -> 8 x W/4
-            # 3. bloks: divas konvolūcijas pēc kārtas (128 -> 256 -> 256), pēc tam saspiešana TIKAI pēc augstuma.
+            # 1. bloks: 1 kanāls -> 64. Vienīgā vieta, kur saspiežam PLATUMU (2x): 64xW -> 32 x W/2
+            nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),
+            # 2. bloks: 64 -> 128, saspiežam tikai augstumu: -> 16 x W/2
+            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),
+            # 3. bloks: 128 -> 256 -> 256, tikai augstums: -> 8 x W/2
             nn.Conv2d(128, 256, 3, 1, 1), nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),  # -> 4 x W/4
-            # 4. bloks: 256 -> 512 -> 512 kanāli ar normalizāciju, atkal saspiešana tikai pēc augstuma.
+            nn.Conv2d(256, 256, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),
+            # 4. bloks: 256 -> 512 -> 512 ar normalizāciju, tikai augstums: -> 4 x W/2
             nn.Conv2d(256, 512, 3, 1, 1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, 3, 1, 1), nn.BatchNorm2d(512), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),  # -> 2 x W/4
-            # Pēdējā konvolūcija ar 2x2 logu bez atkāpes: «apēd» atlikušās 2 augstuma rindas
-            # vienā. Tagad augstums = 1, bet platums ir par 1 mazāks.
-            nn.Conv2d(512, 512, 2, 1, 0), nn.ReLU(inplace=True),  # -> 1 x (W/4 - 1)
+            nn.Conv2d(512, 512, 3, 1, 1), nn.BatchNorm2d(512), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),
+            # Pēdējā konvolūcija ar (4,1) logu: "apēd" atlikušās 4 augstuma rindas -> augstums = 1,
+            # platums NEMAINĀS. Tātad T = W // 2 (vecajā versijā bija W-1 un neatbilda output_length!).
+            nn.Conv2d(512, 512, (4, 1), 1, 0), nn.ReLU(inplace=True),  # -> 1 x W/2
         )
 
     def forward(self, x):
@@ -116,7 +116,7 @@ class CRNN(nn.Module):
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """
-        images: [B, 1, 32, W] — attēlu virkņu partija.
+        images: [B, 1, 64, W] — attēlu virkņu partija.
         Atgriež varbūtību logaritmus formā [T, B, klašu_skaits],
         kur T ir secības garums pēc tam, kad CNN ir saspiedis attēla platumu.
         """
@@ -131,8 +131,7 @@ class CRNN(nn.Module):
         return logits.log_softmax(dim=2)
 
     def output_length(self, input_width: int) -> int:
-        """Cik soļus T tiks iegūts CNN izvadē attēlam ar noteiktu platumu (nepieciešams CTC)?"""
-        w = input_width // 2   # divas MaxPool(2,2) saspiešanas samazināja platumu četras reizes
-        w = w - 1                  # pēdējā konvolūcija ar 2 izmēra logu noņēma vēl vienu kolonnu
-        # max(w, 1) - garantējam, ka rezultāts nav mazāks par 1 (arī ļoti šauram attēlam).
-        return max(w, 1)
+        """Cik soļus T tiks iegūts CNN izvadē attēlam ar noteiktu platumu (nepieciešams CTC)?
+        Platums tiek saspiests tikai vienu reizi (pirmais MaxPool(2,2)) -> T = W // 2.
+        Ja maini CNN (pooling/kernel), JĀLABO ŠĪ FORMULA, citādi CTC redzēs nepareizu garumu."""
+        return max(input_width // 2, 1)

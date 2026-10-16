@@ -1,15 +1,14 @@
 """
-Synthetic data generator.
+Synthetic data generator (v2).
 
-Maps to the flowchart's "Sintētiskie dati" branch: since we don't have scanned
-handwriting yet, we render Latvian text as images and distort them (rotation,
-shear, noise, blur, varying stroke width) to roughly approximate handwriting
-variability. This is a placeholder, not a replacement for real data - swap in
-scanned samples via `RealDataset` in dataset.py as soon as you have them.
-
-For much better realism, drop a handwriting-style .ttf (e.g. any free cursive/
-print handwriting font that supports Latvian diacritics: ā č ē ģ ī ķ ļ ņ š ū ž)
-into FONT_DIR and it will be picked up automatically.
+What changed vs. v1 (see notes in the chat):
+  * TARGET_HEIGHT 32 -> 64 and the text is rendered BIG and downscaled, so letters
+    (and diacritics) stay readable. v1 gave ~5 px per character.
+  * The canvas height comes from font metrics, not from the text's own bounding box,
+    so letter size no longer changes from line to line.
+  * Texts are random word sequences (random_line), not a few fixed lines.
+  * Augmentation mimics photos of notebook pages: grid paper, grey/uneven light,
+    wavy baseline, thicker/thinner ink, noise, blur.
 """
 
 import glob
@@ -17,7 +16,7 @@ import os
 import random
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
@@ -44,13 +43,15 @@ def _find_fallback_font() -> str:
 
 FALLBACK_FONT = _find_fallback_font()
 
-TARGET_HEIGHT = 32  # fixed line height fed into the CNN
+TARGET_HEIGHT = 64  # fixed line height fed into the CNN (model.py expects exactly 64)
 
 
 def _available_fonts() -> list[str]:
     fonts = glob.glob(os.path.join(FONT_DIR, "*.ttf")) + glob.glob(os.path.join(FONT_DIR, "*.otf"))
     return fonts if fonts else [FALLBACK_FONT]
 
+
+# --------------------------------------------------------------------------- texts
 
 def _default_corpus() -> list[str]:
     """Small built-in Latvian word/phrase list, used if data/corpus.txt is absent."""
@@ -66,88 +67,103 @@ def _default_corpus() -> list[str]:
     ]
 
 
-A4_WIDTH_MM = 210
-A4_MARGIN_MM = 20  # per side
-REFERENCE_DPI = 96 
-REFERENCE_FONT_SIZE = 33  # middle of the 26-40 range used in render_text_line
-
-
-def _a4_usable_width_px(font_size: int = REFERENCE_FONT_SIZE, dpi: float | None = None) -> int:
-    dpi = dpi if dpi is not None else 96 * random.uniform(1.5, 2)
-    usable_mm = A4_WIDTH_MM - 2 * A4_MARGIN_MM
-    return int(usable_mm / 25.4 * dpi * (font_size / REFERENCE_FONT_SIZE))
-
-
-def _wrap_line_to_a4(text: str, font: ImageFont.FreeTypeFont) -> list[str]:
-    """Split a long line into several lines that fit the usable A4 width."""
-    max_width_px = _a4_usable_width_px(font.size)
-    draw = ImageDraw.Draw(Image.new("L", (10, 10)))
-
-    words = text.split()
+def load_words() -> list[str]:
+    """All words (punctuation kept attached) from data/corpus.txt; fallback to the built-in list."""
+    corpus_path = os.path.join(os.path.dirname(__file__), "data", "corpus.txt")
+    words: list[str] = []
+    if os.path.exists(corpus_path):
+        with open(corpus_path, encoding="utf-8") as f:
+            words = f.read().split()
     if not words:
-        return []
+        words = [w for line in _default_corpus() for w in line.split()]
+    return words
 
-    lines, current = [], ""
-    for word in words:
-        candidate = f"{current} {word}".strip()
-        width = draw.textbbox((0, 0), candidate, font=font)[2]
-        if width <= max_width_px or not current:
-            current = candidate
-        else:
-            lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines
-
-def random_text(words, n_min=1, n_max=8):
-    return " ".join(random.choices(words, k=random.randint(n_min, n_max)))
 
 def load_corpus() -> list[str]:
-    corpus_path = os.path.join(os.path.dirname(__file__), "data", "corpus.txt")
-    if os.path.exists(corpus_path):
-        random_text(corpus_path)
-        with open(corpus_path, encoding="utf-8") as f:
-            raw_lines = [ln.strip() for ln in f if ln.strip()]
-        if raw_lines:
-            ref_font = ImageFont.truetype(FALLBACK_FONT, REFERENCE_FONT_SIZE)
-            wrapped: list[str] = []
-            for ln in raw_lines:
-                wrapped.extend(_wrap_line_to_a4(ln, ref_font))
-            return wrapped
-    return _default_corpus()
+    """Kept for backward compatibility - returns the word pool."""
+    return load_words()
 
+
+def _random_number() -> str:
+    a, b = random.randint(0, 9999), random.randint(0, 99)
+    return random.choice([str(a), f"{a},{b}", f"({a})", f"{a}.", f"{a}%", f"{b})", f"{a} - {b}"])
+
+
+def random_line(words: list[str], max_chars: int = 60) -> str:
+    """A random 'handwritten line': random words glued together, 6..max_chars characters."""
+    target = random.randint(6, max_chars)
+    parts: list[str] = []
+    length = 0
+    guard = 0
+    while length < target and guard < 200:
+        guard += 1
+        w = _random_number() if random.random() < 0.07 else random.choice(words)
+        extra = len(w) + (1 if parts else 0)
+        if length + extra > max_chars:
+            if parts:
+                break
+            continue
+        parts.append(w)
+        length += extra
+    return " ".join(parts) if parts else random.choice(words)[:max_chars]
+
+
+# --------------------------------------------------------------------------- rendering
 
 def render_text_line(text: str, font_path: str | None = None, augment: bool = True) -> Image.Image:
-    """Render `text` as a single grayscale line image of fixed height."""
+    """Render `text` as a grayscale line image of height TARGET_HEIGHT."""
     font_path = font_path or random.choice(_available_fonts())
-    font_size = random.randint(26, 40)
+    font_size = random.randint(56, 88)  # big on purpose; downscaled at the end
     font = ImageFont.truetype(font_path, font_size)
+    ascent, descent = font.getmetrics()
 
-    # Measure text to size the canvas, with padding
-    dummy = Image.new("L", (10, 10), color=255)
-    bbox = ImageDraw.Draw(dummy).textbbox((0, 0), text, font=font)
-    w = max(1, bbox[2] - bbox[0]) + 20
-    h = max(1, bbox[3] - bbox[1]) + 20
+    dummy = ImageDraw.Draw(Image.new("L", (10, 10), color=255))
+    bbox = dummy.textbbox((0, 0), text, font=font)
 
+    pad_x = int(font_size * random.uniform(0.15, 0.5))
+    pad_y = int(font_size * random.uniform(0.15, 0.3))
+    top = min(0, bbox[1])
+    bottom = max(ascent + descent, bbox[3])
+    w = max(1, bbox[2] - bbox[0]) + 2 * pad_x
+    h = (bottom - top) + 2 * pad_y
+
+    ink = random.randint(0, 90)
     img = Image.new("L", (w, h), color=255)
-    draw = ImageDraw.Draw(img)
-    draw.text((10 - bbox[0], 10 - bbox[1]), text, font=font, fill=0)
+    ImageDraw.Draw(img).text((pad_x - bbox[0], pad_y - top), text, font=font, fill=ink)
 
     if augment:
         img = _augment(img)
 
-    img = _resize_keep_ratio(img, TARGET_HEIGHT)
-    return img
+    w, h = img.size
+    new_w = max(1, int(w * (TARGET_HEIGHT / h)))
+    return img.resize((new_w, TARGET_HEIGHT), Image.BILINEAR)
+
+
+def _paper_background(w: int, h: int) -> np.ndarray:
+    """Grey-ish paper, optionally with notebook grid lines (like the real scans)."""
+    level = random.randint(185, 255)
+    bg = np.full((h, w), level, dtype=np.float32)
+
+    if random.random() < 0.55:  # grid paper
+        cell = max(8, int(h * random.uniform(0.18, 0.4)))
+        thick = max(1, int(round(h / 70)))
+        dark = random.randint(25, 80)
+        ox, oy = random.randint(0, cell - 1), random.randint(0, cell - 1)
+        for x in range(ox, w, cell):
+            bg[:, x:x + thick] -= dark
+        for y in range(oy, h, cell):
+            bg[y:y + thick, :] -= dark
+    return np.clip(bg, 0, 255)
 
 
 def _augment(img: Image.Image) -> Image.Image:
-    # Slight random rotation
-    angle = random.uniform(-3, 3)
-    img = img.rotate(angle, expand=True, fillcolor=255)
+    # thicker ink (MinFilter grows dark strokes on a light background)
+    if random.random() < 0.3:
+        img = img.filter(ImageFilter.MinFilter(3))
 
-    # Slight shear via affine transform, mimics slanted handwriting
-    shear = random.uniform(-0.25, 0.25)
+    # rotation + shear (slanted handwriting)
+    img = img.rotate(random.uniform(-2, 2), expand=True, fillcolor=255)
+    shear = random.uniform(-0.3, 0.3)
     w, h = img.size
     img = img.transform(
         (w + int(abs(shear) * h), h),
@@ -156,35 +172,50 @@ def _augment(img: Image.Image) -> Image.Image:
         fillcolor=255,
     )
 
-    if random.random() < 0.5:
-        img = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.2, 0.8)))
-
-    if random.random() < 0.5:
-        arr = np.array(img).astype(np.float32)
-        noise = np.random.normal(0, random.uniform(3, 10), arr.shape)
-        arr = np.clip(arr + noise, 0, 255).astype(np.uint8)
+    # wavy baseline: shift every column up/down by a slow sine wave
+    w, h = img.size
+    amp = int(random.uniform(0, 0.05) * h)
+    if amp > 0:
+        img = ImageOps.expand(img, border=(0, amp, 0, amp), fill=255)
+        arr = np.array(img)
+        wavelength = random.uniform(300, 1200)
+        phase = random.uniform(0, 2 * np.pi)
+        shifts = np.round(amp * np.sin(2 * np.pi * np.arange(arr.shape[1]) / wavelength + phase)).astype(int)
+        for x in range(arr.shape[1]):
+            arr[:, x] = np.roll(arr[:, x], shifts[x])
         img = Image.fromarray(arr)
+
+    # paper + uneven lighting, ink stays darker than paper
+    w, h = img.size
+    text = np.array(img).astype(np.float32)
+    paper = _paper_background(w, h)
+    out = np.minimum(text, paper)
+    light = np.linspace(random.uniform(0.75, 1.0), random.uniform(0.75, 1.0), w, dtype=np.float32)
+    out = out * light[None, :]
+    img = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+
+    if random.random() < 0.6:
+        img = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.3, 1.8)))
+
+    if random.random() < 0.6:
+        arr = np.array(img).astype(np.float32)
+        arr += np.random.normal(0, random.uniform(2, 12), arr.shape)
+        img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
     return img
 
 
-def _resize_keep_ratio(img: Image.Image, target_height: int) -> Image.Image:
-    w, h = img.size
-    new_w = max(1, int(w * (target_height / h)))
-    return img.resize((new_w, target_height), Image.BILINEAR)
-
-
-def generate_batch(n: int, corpus: list[str] | None = None) -> list[tuple[Image.Image, str]]:
-    corpus = corpus or load_corpus()
+def generate_batch(n: int, words: list[str] | None = None) -> list[tuple[Image.Image, str]]:
+    words = words or load_words()
     samples = []
     for _ in range(n):
-        text = random.choice(corpus)
+        text = random_line(words)
         samples.append((render_text_line(text), text))
     return samples
 
 
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)
-    for i, (img, text) in enumerate(generate_batch(10000)):
+    for i, (img, text) in enumerate(generate_batch(20)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")

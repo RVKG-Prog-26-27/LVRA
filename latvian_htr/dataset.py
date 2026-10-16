@@ -12,10 +12,10 @@ import csv
 import os    
 
 import torch                          
-from PIL import Image                 
+from PIL import Image, ImageOps
 from torch.utils.data import Dataset  
 
-from synthetic_data import TARGET_HEIGHT, generate_batch, load_corpus, render_text_line
+from synthetic_data import TARGET_HEIGHT, load_words, random_line, render_text_line
 
 import numpy as np  # skaitļu masīvi
 
@@ -24,7 +24,10 @@ def image_to_tensor(img: Image.Image) -> torch.Tensor:
     """Neironu tīklam pillow attēlu pārvērš skaitļu tenzorā no 0 līdz 1."""
     # Pārveidojam pelēktoņu attēlā ("L") un skaitļu masīvā. Dalām ar 255, lai
     # spilgtums 0..255 pārvērstos par 0.0..1.0 (neironu tīklam tā ir vieglāk mācīties).
-    arr = np.array(img.convert("L"), dtype=np.float32) / 255.0
+    # autocontrast: pelēks/tumšs fons (foto, skenējumi) -> tuvu baltam, tinte -> tuvu melnai.
+    # Tas pats solis darbojas gan apmācībā (sintētika + reālie), gan secināšanā (infer.py).
+    img = ImageOps.autocontrast(img.convert("L"), cutoff=1)
+    arr = np.array(img, dtype=np.float32) / 255.0
     # Apgriežam spilgtumu: iepriekš «balts fons = 1, melna tinte = 0»,
     # tagad «fons = 0, tinte ~ 1». Tīklam tā ir vieglāk: «ir tinte» = liels skaitlis.
     arr = 1.0 - arr
@@ -38,7 +41,7 @@ class SyntheticHTRDataset(Dataset):
         # length - viens mācību cikls.
         self.length = length
         # Tekstu kopa
-        self.corpus = corpus or load_corpus()
+        self.corpus = corpus or load_words()   # vārdu saraksts (nevis gatavas rindas)
 
     def __len__(self):
         # piemēru skaits
@@ -48,7 +51,7 @@ class SyntheticHTRDataset(Dataset):
         # katru reizi izveidojam nejaušu piemēru.
         import random  # importējam tieši tur, kur to izmantojam
 
-        text = random.choice(self.corpus)   # nejaušs teksts
+        text = random_line(self.corpus)     # nejauša rinda no nejaušiem vārdiem (≤60 simboli)
         img = render_text_line(text)        # izveidojam attēlu ar izmaiņām
         return image_to_tensor(img), text   # atgriežam pāri (tenzors, teksts)
 
