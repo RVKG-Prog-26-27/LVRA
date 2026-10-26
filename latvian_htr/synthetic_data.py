@@ -11,12 +11,15 @@ What changed vs. v1 (see notes in the chat):
     wavy baseline, thicker/thinner ink, noise, blur.
 """
 
+import functools
 import glob
 import os
 import random
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+
+from alphabet import ALPHABET
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
@@ -49,6 +52,27 @@ TARGET_HEIGHT = 64  # fixed line height fed into the CNN (model.py expects exact
 def _available_fonts() -> list[str]:
     fonts = glob.glob(os.path.join(FONT_DIR, "*.ttf")) + glob.glob(os.path.join(FONT_DIR, "*.otf"))
     return fonts if fonts else [FALLBACK_FONT]
+
+
+def _glyph_bytes(font: ImageFont.FreeTypeFont, ch: str) -> bytes:
+    img = Image.new("L", (100, 100), 0)
+    ImageDraw.Draw(img).text((10, 10), ch, font=font, fill=255)
+    return img.tobytes()
+
+
+@functools.lru_cache(maxsize=None)
+def font_charset(font_path: str) -> frozenset:
+    """Which characters of our alphabet this font can really draw.
+    A missing glyph is drawn as an empty box (.notdef) while the label keeps the real letter -
+    the network would then learn 'box = a / ā / š / ž ...', which is impossible. So we never
+    put such characters into texts rendered with this font."""
+    font = ImageFont.truetype(font_path, 48)
+    notdef = _glyph_bytes(font, "\uFFFF")
+    ok = {" "}
+    for ch in ALPHABET[1:]:  # [0] is the CTC blank
+        if ch != " " and _glyph_bytes(font, ch) != notdef:
+            ok.add(ch)
+    return frozenset(ok)
 
 
 # --------------------------------------------------------------------------- texts
@@ -89,8 +113,13 @@ def _random_number() -> str:
     return random.choice([str(a), f"{a},{b}", f"({a})", f"{a}.", f"{a}%", f"{b})", f"{a} - {b}"])
 
 
-def random_line(words: list[str], max_chars: int = 60) -> str:
-    """A random 'handwritten line': random words glued together, 6..max_chars characters."""
+def random_line(words: list[str], max_chars: int = 60, allowed=None) -> str:
+    """A random 'handwritten line': random words glued together, 6..max_chars characters.
+    `allowed` - set of characters the font can draw; words/numbers with other characters are skipped."""
+    if allowed is not None:
+        words = [w for w in words if set(w) <= allowed] or [w for w in words if set(w) <= allowed | set("0123456789")]
+        if not words:
+            words = ["a"]
     target = random.randint(6, max_chars)
     parts: list[str] = []
     length = 0
@@ -98,6 +127,8 @@ def random_line(words: list[str], max_chars: int = 60) -> str:
     while length < target and guard < 200:
         guard += 1
         w = _random_number() if random.random() < 0.07 else random.choice(words)
+        if allowed is not None and not set(w) <= allowed:
+            continue
         extra = len(w) + (1 if parts else 0)
         if length + extra > max_chars:
             if parts:
@@ -106,6 +137,15 @@ def random_line(words: list[str], max_chars: int = 60) -> str:
         parts.append(w)
         length += extra
     return " ".join(parts) if parts else random.choice(words)[:max_chars]
+
+
+def make_sample(words: list[str], max_chars: int = 60, augment: bool = True) -> tuple[Image.Image, str]:
+    """Pick a random font, build a text this font can fully draw, render it. Returns (image, text)."""
+    fonts = _available_fonts()
+    font_path = random.choice(fonts)
+    allowed = font_charset(font_path)
+    text = random_line(words, max_chars, allowed)
+    return render_text_line(text, font_path=font_path, augment=augment), text
 
 
 # --------------------------------------------------------------------------- rendering
@@ -209,13 +249,12 @@ def generate_batch(n: int, words: list[str] | None = None) -> list[tuple[Image.I
     words = words or load_words()
     samples = []
     for _ in range(n):
-        text = random_line(words)
-        samples.append((render_text_line(text), text))
+        samples.append(make_sample(words))
     return samples
 
 
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)
-    for i, (img, text) in enumerate(generate_batch(20)):
+    for i, (img, text) in enumerate(generate_batch(10000)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")

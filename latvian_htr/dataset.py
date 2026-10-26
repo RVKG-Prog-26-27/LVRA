@@ -15,7 +15,7 @@ import torch
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset  
 
-from synthetic_data import TARGET_HEIGHT, load_words, random_line, render_text_line
+from synthetic_data import TARGET_HEIGHT, load_words, make_sample
 
 import numpy as np  # skaitļu masīvi
 
@@ -51,8 +51,8 @@ class SyntheticHTRDataset(Dataset):
         # katru reizi izveidojam nejaušu piemēru.
         import random  # importējam tieši tur, kur to izmantojam
 
-        text = random_line(self.corpus)     # nejauša rinda no nejaušiem vārdiem (≤60 simboli)
-        img = render_text_line(text)        # izveidojam attēlu ar izmaiņām
+        # make_sample izvēlas fontu un tekstu, kuru šis fonts PILNĪBĀ spēj uzzīmēt (bez trūkstošo glifu kastēm)
+        img, text = make_sample(self.corpus)
         return image_to_tensor(img), text   # atgriežam pāri (tenzors, teksts)
 
 
