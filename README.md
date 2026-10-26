@@ -1,459 +1,75 @@
-# Latviešu rokrakstu atpazīšana — alphaa versija_02
+# LVRA — Latviešu valodas rokraksta atpazīšana
 
-**LVRA (Latviešu Valodas Rokraksta Atpazīšana)** ir eksperimentāls latviešu rokraksta atpazīšanas projekts. Mērķis ir no rokrakstā rakstīta teksta attēla iegūt rediģējamu digitālu tekstu.
+**LVRA** ir eksperimentāla sistēma, kas no rokrakstā rakstīta latviešu teksta attēla iegūst rediģējamu digitālu tekstu. Projektu veido divas daļas:
 
-Šobrīd projektā ir izveidota funkcionējoša **CRNN + CTC** atpazīšanas sistēma, sintētisko un reālo datu atbalsts, individuāli `input_lengths` CTC apmācībai un **CTC Prefix Beam Search** dekodēšana.
+| Daļa | Mape | Tehnoloģijas | Uzdevums |
+| --- | --- | --- | --- |
+| Atpazīšanas modelis | `latvian_htr/` | Python, PyTorch | Apmācīt un palaist CRNN + CTC modeli, kas nolasa vienu teksta rindu no attēla |
+| Web lietotne | `web-app/` | React 18, TypeScript, Vite | Telefonam pielāgota saskarne latviešu valodā: foto → teksts → labošana → kopēšana |
 
-> **Alpha versija:** modelis un datu ģenerēšana jau darbojas, taču atpazīšanas kvalitāte vēl nav uzskatāma par gala produkta līmeni. Lai sasniegtu labu reāla rokraksta atpazīšanu, nepieciešams lielāks un kvalitatīvāks reālo rokraksta datu kopums.
-
----
-
-## Arhitektūra
-
-Sākotnējā blokshēmā CNN un BiLSTM bija attēloti kā divi neatkarīgi zari. Rokraksta atpazīšanai tie tiek izmantoti **secīgi**, veidojot CRNN arhitektūru:
-
-```text
-Attēls
-  │
-  ▼
-CNN
-  │
-  │ vizuālo pazīmju iegūšana
-  ▼
-BiLSTM
-  │
-  │ konteksta analīze abos virzienos
-  ▼
-BiLSTM
-  │
-  ▼
-Linear
-  │
-  │ rakstzīmju varbūtības
-  ▼
-CTC
-  │
-  ▼
-Teksts
-```
-
-### CNN
-
-CNN apstrādā attēlu un iegūst vizuālās pazīmes:
-
-* burtu formas;
-* līnijas;
-* rakstzīmju kontūras;
-* telpisko izvietojumu.
-
-Attēla platums tiek pārvērsts par secību, kuru pēc tam var apstrādāt ar RNN.
-
-### BiLSTM
-
-Divi BiLSTM slāņi analizē secību abos virzienos.
-
-Tas ļauj modelim izmantot ne tikai informāciju no iepriekšējiem, bet arī no nākamajiem simboliem.
-
-Piemēram, neskaidru rakstzīmi var palīdzēt atpazīt tās konteksts vārdā.
-
-### CTC
-
-CTC (**Connectionist Temporal Classification**) ļauj apmācīt modeli bez nepieciešamības iepriekš sadalīt attēlu atsevišķos burtos.
-
-Modelim nav jāzina:
-
-```text
-kur tieši atrodas pirmais burts
-kur tieši atrodas otrais burts
-kur tieši atrodas trešais burts
-```
-
-Tam pietiek ar:
-
-```text
-attēls → "Labdien!"
-```
-
-CTC pats optimizē iespējamos izlīdzinājumus starp attēla secību un tekstu.
+> **Statuss: alpha.** Python modelis un web lietotne darbojas katrs atsevišķi, bet **web lietotne vēl nav savienota ar reālo modeli** — tā izmanto `mock` servisu, kas vienmēr atgriež vienu un to pašu demonstrācijas tekstu. Atpazīšanas kvalitāte uz reāla rokraksta vēl nav pietiekama gala produktam (skat. [Zināmie ierobežojumi](#zināmie-ierobežojumi)).
 
 ---
 
-# Kas šobrīd darbojas
+## Satura rādītājs
 
-## 1. Latviešu rakstzīmju kopa
-
-`alphabet.py` satur rakstzīmju kopu, ko izmanto modelis.
-
-Tajā ir latviešu valodai nepieciešamās rakstzīmes, tostarp diakritiskās:
-
-```text
-ā č ē ģ ī ķ ļ ņ š ū ž
-```
-
-kā arī:
-
-* lielie un mazie burti;
-* cipari;
-* atstarpes;
-* pieturzīmes;
-* CTC `blank` simbols.
-
-Ir pieejama teksta kodēšana uz indeksiem un dekodēšana atpakaļ uz tekstu.
+1. [Statuss](#statuss)
+2. [Ātrais starts](#ātrais-starts)
+3. [Modeļa izmantošana](#modeļa-izmantošana)
+4. [Kā modelis darbojas](#kā-modelis-darbojas)
+5. [Dati](#dati)
+6. [Web lietotne](#web-lietotne)
+7. [Projekta struktūra](#projekta-struktūra)
+8. [Zināmie ierobežojumi](#zināmie-ierobežojumi)
+9. [Ceļvedis](#ceļvedis)
+10. [Papildu dokumentācija](#papildu-dokumentācija)
 
 ---
 
-## 2. Sintētisko datu ģenerēšana
+## Statuss
 
-`synthentic_data.py` ģenerē apmācības attēlus automātiski.
-
-No teksta tiek izveidots attēls, kuru pēc tam var modificēt ar dažādiem vizuāliem traucējumiem.
-
-Tiek izmantotas, piemēram:
-
-* neliela rotācija;
-* perspektīvas/šķības deformācijas;
-* trokšņi;
-* nelielas attēla kvalitātes izmaiņas;
-* citas vienkāršas deformācijas.
-
-Tas ļauj sākt modeļa izstrādi arī tad, ja vēl nav liela reāla rokraksta datu kopuma.
-
-### Svarīgs ierobežojums
-
-Pašlaik sintētiskie dati galvenokārt izmanto parastos datorfontus, nevis īstu cilvēka rokrakstu.
-
-Tāpēc sintētiskie dati ir piemēroti arhitektūras un apmācības pārbaudei, bet ar tiem vien nepietiks kvalitatīvai reāla rokraksta atpazīšanai.
+| Komponente | Statuss |
+| --- | --- |
+| Latviešu rakstzīmju kopa (130 klases, ieskaitot CTC `blank`) | ✅ |
+| Sintētisko datu ģenerators (rokraksta imitācija, svītrojumi, papīra fons) | ✅ |
+| Reālo datu ielāde (`RealHTRDataset`) | ✅ |
+| CRNN modelis (CNN + 2×BiLSTM + Linear) | ✅ |
+| Mainīga attēla platuma atbalsts (individuāli `input_lengths`) | ✅ |
+| Apmācība ar CTC, Adam, `ReduceLROnPlateau`, gradientu ierobežošana | ✅ |
+| Viena attēla atpazīšana (`infer.py`) ar CTC Prefix Beam Search | ✅ |
+| Novērtēšana ar CER (`evaluate.py`, greedy dekodēšana) | ✅ |
+| Web lietotnes saskarne latviešu valodā | ✅ |
+| WER, kā arī Greedy un Beam Search salīdzinājums | ❌ |
+| Web lietotnes savienojums ar modeli (backend API) | ❌ |
+| Pietiekami liela reāla rokraksta datu kopa | ❌ |
+| Optimizētāja stāvokļa saglabāšana (pilna apmācības atsākšana) | ❌ |
 
 ---
 
-## 3. Reālo datu atbalsts
+## Ātrais starts
 
-`dataset.py` satur `RealHTRDataset`, kas ļauj izmantot reālus rokraksta attēlus.
+### Prasības
 
-Datu struktūra:
+- **Python 3.10 vai jaunāks** (kodā tiek lietota sintakse `list[str] | None`)
+- Python bibliotēkas: `torch>=2.2`, `numpy`, `pillow` (skat. `latvian_htr/requirements.txt`)
+- **Node.js (LTS)** — tikai web lietotnei
+- NVIDIA GPU nav obligāts; ja CUDA ir pieejama, tā tiek izmantota automātiski, citādi apmācība notiek uz CPU
 
-```text
-data/real_dataset/
-├── labels.csv
-└── images/
-    ├── 0001.png
-    ├── 0002.png
-    └── 0003.png
-```
-
-`labels.csv`:
-
-```csv
-filename,text
-0001.png,Labdien! Kā jums iet?
-0002.png,Rīgā šodien līst.
-0003.png,Šis ir rokraksta piemērs.
-```
-
-Reālos un sintētiskos datus iespējams izmantot vienā apmācībā.
-
----
-
-# 4. Mainīga attēlu platuma atbalsts
-
-Attēli vienā batch parasti nav vienāda platuma.
-
-Piemēram:
-
-```text
-160 px
-240 px
-320 px
-```
-
-Lai tos ievietotu vienā batch, īsākie attēli tiek papildināti ar `padding` līdz maksimālajam platumam:
-
-```text
-160 → 320
-240 → 320
-320 → 320
-```
-
-Tomēr padding nav īsts attēla saturs.
-
-Tāpēc modelis saglabā katra attēla sākotnējo platumu un aprēķina tam individuālu:
-
-```text
-input_length
-```
-
-Piemēram:
-
-```text
-attēla platums: 160 → input_length = 39
-attēla platums: 240 → input_length = 59
-attēla platums: 320 → input_length = 79
-```
-
-CTC tādējādi redz tikai reālo attēla daļu un neizmanto padding kā teksta informāciju.
-
-Tas ir svarīgs uzlabojums salīdzinājumā ar sākotnējo variantu, kur visiem batch elementiem tika izmantots vienāds `T`.
-
----
-
-# 5. CTC Beam Search dekodēšana
-
-Pēc modeļa apmācības teksts jāiegūst no modeļa izvades.
-
-Vienkāršākā metode ir **greedy decoding**:
-
-```text
-katram laika solim
-        ↓
-izvēlies visvarbūtīgāko rakstzīmi
-        ↓
-izveido tekstu
-```
-
-Taču visvarbūtīgākā rakstzīme katrā atsevišķā solī ne vienmēr veido visvarbūtīgāko tekstu kopumā.
-
-Tāpēc alpha versijā ir ieviests **CTC Prefix Beam Search**.
-
-Beam Search vienlaikus saglabā vairākus labākos iespējamos teksta variantus.
-
-Piemēram:
-
-```text
-beam_width = 3
-
-        ┌── "hat"
-        │
-        ├── "had"
-attēls ─┤
-        └── "her"
-```
-
-Pēc katra nākamā soļa mazāk ticamie varianti tiek atmesti.
-
-### `beam-width`
-
-Izmēru var mainīt ar:
-
-```bash
---beam-width
-```
-
-Piemēram:
-
-```bash
-python infer.py \
-  --checkpoint checkpoints/crnn_step2000.pt \
-  --image samples/sample_0.png \
-  --beam-width 5
-```
-
-Vai:
-
-```bash
-python infer.py \
-  --checkpoint checkpoints/crnn_step2000.pt \
-  --image samples/sample_0.png \
-  --beam-width 10
-```
-
-Ieteicamais sākuma diapazons:
-
-```text
-5–20
-```
-
-Lielāks `beam_width` nozīmē vairāk pārbaudītu variantu un nedaudz lielāku aprēķinu laiku.
-
-**Beam Search neprasa modeļa pārtrenēšanu**, jo tas maina tikai jau iegūto modeļa izvades dekodēšanas veidu.
-
----
-
-# 6. Attēla sagatavošana
-
-Pirms attēls tiek padots modelim, `infer.py`:
-
-1. atver attēlu;
-2. pārveido to pelēktoņu attēlā;
-3. saglabā proporcijas;
-4. pielāgo attēla augstumu līdz 32 pikseļiem;
-5. pārveido attēlu tensorā;
-6. padod to CRNN modelim.
-
-Tādējādi inference izmanto tādu pašu attēla formātu kā apmācības laikā.
-
----
-
-# 7. Apmācība
-
-`train.py` realizē pilnu apmācības ciklu:
-
-```text
-dati
- ↓
-DataLoader
- ↓
-CRNN
- ↓
-CTC Loss
- ↓
-backpropagation
- ↓
-Adam
- ↓
-jauni modeļa svari
-```
-
-Tiek izmantots:
-
-* `Adam` optimizētājs;
-* `CTCLoss`;
-* gradientu clipping;
-* CUDA, ja pieejama NVIDIA GPU;
-* CPU kā rezerves variants;
-* batch apstrāde;
-* checkpoint saglabāšana.
-
-Piemēram:
-
-```bash
-python train.py --steps 2000 --batch-size 32
-```
-
----
-
-# 8. Checkpoint
-
-Pēc noteikta soļu skaita modelis tiek saglabāts:
-
-```text
-checkpoints/
-├── crnn_step500.pt
-├── crnn_step1000.pt
-├── crnn_step1500.pt
-└── crnn_step2000.pt
-```
-
-Checkpoint satur apmācītā modeļa svarus.
-
-Tas ļauj izmantot jau apmācītu modeli inference laikā, neapmācot to vēlreiz no nulles.
-
----
-
-# 9. Inference
-
-Lai pārbaudītu apmācītu modeli uz vienas bildes:
-
-```bash
-python infer.py \
-  --checkpoint checkpoints/crnn_step2000.pt \
-  --image samples/sample_0.png
-```
-
-Modelis:
-
-```text
-attēls
-  ↓
-CNN
-  ↓
-BiLSTM
-  ↓
-Linear
-  ↓
-CTC log-probabilities
-  ↓
-Beam Search
-  ↓
-atpazītais teksts
-```
-
----
-
-# 10. Web lietotne
-
-Projektā ir arī `web-app/` mape ar React/Vite lietotni.
-
-Tā jau nodrošina lietotāja saskarni latviešu valodā:
-
-* attēla izvēli;
-* fotografēšanu ar telefonu;
-* attēla priekšskatījumu;
-* attēla pagriešanu;
-* atpazīšanas procesa ekrānu;
-* atcelšanu;
-* rezultāta attēlošanu;
-* atpazītā teksta rediģēšanu;
-* teksta kopēšanu;
-* kļūdu paziņojumus;
-* izstrādātāja testēšanas paneli.
-
-Tomēr **web lietotne pašlaik vēl nav savienota ar reālo CRNN modeli**.
-
-Tā izmanto pagaidu `mock` atpazīšanas servisu, kas neatkarīgi no izvēlētā attēla atgriež iepriekš sagatavotu demonstrācijas tekstu.
-
-Tāpēc pašreizējā alpha versijā:
-
-```text
-Python CRNN modelis       ✅ darbojas atsevišķi
-Python inference          ✅ darbojas
-Beam Search               ✅ darbojas
-Web lietotne              ✅ darbojas
-Web lietotne → CRNN       ❌ vēl nav savienots
-```
-
----
-
-# Palaišana
-
-## Python daļa
-
-Instalē nepieciešamās bibliotēkas:
-
-```bash
-pip install -r latvian_htr/requirements.txt
-```
-
-Izveido sintētiskos paraugus:
+### Python daļa
 
 ```bash
 cd latvian_htr
-python synthetic_data.py
-```
+pip install -r requirements.txt
 
-Apmāci modeli:
-
-```bash
-python train.py --steps 2000 --batch-size 32
-```
-
-Apmāci modeli ar reāliem datiem:
-
-```bash
-python train.py \
-  --steps 5000 \
-  --real-data ../data/real_dataset
-```
-
-Pārbaudi modeli:
-
-```bash
+# Pārbaudīt jau apmācītu modeli uz vienas reāla rokraksta rindas
 python infer.py \
-  --checkpoint checkpoints/crnn_step2000.pt \
-  --image ../samples/sample_0.png
+  --checkpoint checkpoints_v2/crnn_step30000.pt \
+  --image data/real_dataset/images/0001.png
 ```
 
-Izmanto lielāku Beam Search:
+Rezultāts tiek izdrukāts formā `Teksts: '...'`.
 
-```bash
-python infer.py \
-  --checkpoint checkpoints/crnn_step2000.pt \
-  --image ../samples/sample_0.png \
-  --beam-width 10
-```
-
----
-
-# Web lietotnes palaišana
+### Web lietotne
 
 ```bash
 cd web-app
@@ -461,152 +77,288 @@ npm install
 npm run dev
 ```
 
-Pēc tam pārlūkprogrammā atver:
-
-```text
-http://localhost:5173
-```
-
-Telefonam tajā pašā tīklā:
-
-```bash
-npm run dev:phone
-```
+Atver `http://localhost:5173`. Lai pārbaudītu uz telefona (dators un telefons vienā Wi-Fi tīklā): `npm run dev:phone` un atver terminālī parādīto `Network` adresi.
 
 ---
 
-# Projekta struktūra
+## Modeļa izmantošana
+
+Visas komandas tiek izpildītas mapē `latvian_htr/`.
+
+### 1. Sintētisko paraugu ģenerēšana
+
+```bash
+python synthetic_data.py
+```
+
+Izveido 20 paraugus mapē `samples/` (`sample_0.png` … `sample_19.png`) un izdrukā to tekstus. Noder vizuālai ģeneratora pārbaudei.
+
+### 2. Apmācība
+
+```bash
+# tikai sintētiskie dati
+python train.py --steps 2000 --batch-size 32
+
+# sintētiskie + reālie dati
+python train.py --steps 20000 --real-data data/real_dataset
+```
+
+| Parametrs | Noklusējums | Nozīme |
+| --- | --- | --- |
+| `--steps` | `20000` | Apmācības soļu skaits (1 solis = 1 batch) |
+| `--batch-size` | `64` | Piemēru skaits vienā solī |
+| `--lr` | `1e-3` | Sākotnējais mācīšanās ātrums |
+| `--synth-per-epoch` | `5000` | Sintētisko piemēru skaits vienā «epohā» |
+| `--real-data` | — | Ceļš uz reālo datu mapi; ja norādīts, tiek pievienoti sintētiskajiem |
+| `--num-workers` | `2` | Paralēlie datu sagatavotāji |
+| `--log-every` | `500` | Cik bieži izdrukāt zudumus |
+| `--checkpoint-every` | `1000` | Cik bieži saglabāt svarus |
+| `--checkpoint-dir` | `checkpoints` | Kur saglabāt `crnn_step<N>.pt` |
+| `--resume` | — | Ielādē svarus no esoša checkpoint un turpina apmācību |
+
+Piezīmes par `--resume`: tiek ielādēti tikai **modeļa svari** (nevis optimizētājs vai soļu skaitītājs), tāpēc soļu skaitītājs sākas no 0 un jauni checkpoint faili var pārrakstīt vecos, ja `--checkpoint-dir` nav mainīts.
+
+### 3. Atpazīšana (inference)
+
+```bash
+python infer.py \
+  --checkpoint checkpoints_v2/crnn_step30000.pt \
+  --image data/real_dataset/images/0001.png \
+  --beam-width 10
+```
+
+`--beam-width` (noklusējums `5`) nosaka, cik labāko teksta variantu tiek saglabāti dekodēšanas laikā. Lielāka vērtība nozīmē vairāk pārbaudītu variantu un nedaudz lēnāku darbību. Parametra maiņa **neprasa modeļa pārtrenēšanu**.
+
+Modelis paredzēts **vienai teksta rindai** — nevis visai lapai.
+
+### 4. Kvalitātes novērtēšana (CER)
+
+```bash
+python evaluate.py --checkpoint checkpoints_v2/crnn_step30000.pt
+python evaluate.py --checkpoint checkpoints_v2/crnn_step30000.pt --synthetic 500
+```
+
+Skripts izdrukā **CER** (Character Error Rate = labojumu skaits / pareizo rakstzīmju skaits; mazāks ir labāk) atsevišķi reālajiem un svaigi ģenerētajiem sintētiskajiem paraugiem, kā arī dažus piemērus «pareizi / modelis».
+
+Svarīgi:
+- Novērtēšana izmanto **greedy** dekodēšanu, nevis Beam Search.
+- Ja reālie dati tika iekļauti apmācībā (`--real-data`), CER uz tiem ir **optimistisks**. Godīgam rezultātam reālos paraugus vēlams atdalīt no apmācības.
+
+---
+
+## Kā modelis darbojas
+
+Izmantota **CRNN** arhitektūra (konvolucionāls tīkls + rekurents tīkls) ar **CTC** zudumu funkciju. CNN un BiLSTM ir savienoti **secīgi**: CNN izvade ir BiLSTM ievade.
+
+```text
+Attēls [B, 1, 64, W]
+   │
+   ▼  CNN — vizuālo pazīmju iegūšana, augstums 64 → 1
+[B, 512, 1, W/2]
+   │
+   ▼  attēla platums kļūst par laika asi T = W / 2
+[T, B, 512]
+   │
+   ▼  2 × BiLSTM (hidden = 256) — konteksts abos virzienos
+[T, B, 512]
+   │
+   ▼  Linear → log_softmax
+[T, B, 130]   rakstzīmju varbūtības katrā solī
+   │
+   ▼  CTC dekodēšana (Beam Search)
+Teksts
+```
+
+| Daļa | Fails | Apraksts |
+| --- | --- | --- |
+| Alfabēts | `alphabet.py` | Rakstzīmju ↔ indeksu tabula, `encode`, `decode_greedy`, `decode_beam_search`, `strip_struck` |
+| CNN | `model.py` → `CNNBackbone` | Konvolūcijas + MaxPool; platumu saspiež tikai vienreiz (×2), augstumu — līdz 1 |
+| BiLSTM + Linear | `model.py` → `BiLSTMHead` | 2 slāņi, divvirzienu; izvada rezultātu katrai rakstzīmei |
+| Modelis | `model.py` → `CRNN` | Savieno abas daļas; `output_length(W)` = `max(W // 2, 1)` |
+| Datu ielāde | `dataset.py` | `SyntheticHTRDataset`, `RealHTRDataset`, `collate_batch`, `image_to_tensor` |
+
+### Attēla sagatavošana
+
+Gan apmācībā, gan atpazīšanā attēls tiek apstrādāts vienādi:
+
+1. pārveidošana pelēktoņos;
+2. mērogošana līdz **64 px augstumam** (proporcijas saglabātas);
+3. automātiskais kontrasts (`autocontrast`), lai pelēks vai tumšs fons kļūtu gaišs;
+4. krāsu apgriešana (fons = 0, tinte ≈ 1);
+5. tensors `[1, 64, W]`.
+
+### Mainīga platuma attēli
+
+Vienā batch attēli tiek papildināti ar nullēm līdz platākā attēla platumam. Lai CTC neuztvertu šo papildinājumu kā saturu, `train.py` katram piemēram aprēķina individuālu `input_length = model.output_length(W)`.
+
+> **Ja maināt CNN** (pooling vai kernel izmērus), jāpielāgo arī `CRNN.output_length`, citādi CTC saņems nepareizus garumus.
+
+### CTC un dekodēšana
+
+CTC ļauj apmācīt modeli, nenorādot, kur attēlā atrodas katrs burts. Modelis katrā laika solī izvēlas rakstzīmi vai `blank`.
+
+- **Greedy** (`decode_greedy`): katrā solī ņem visvarbūtīgāko klasi, sakļauj atkārtojumus, noņem `blank`.
+- **CTC Prefix Beam Search** (`decode_beam_search`): saglabā `beam_width` labākos teksta prefiksus. Izmanto `infer.py`.
+
+### Apmācības cikls
+
+`train.py` izmanto `Adam`, `CTCLoss(blank=0, zero_infinity=True)`, gradientu ierobežošanu (norma 5.0) un `PlateauScheduler` (ik pēc 200 soļiem pārbauda vidējo zudumu; ja tas neuzlabojas, `lr` tiek samazināts uz pusi). Svari tiek saglabāti kā `crnn_step<N>.pt`.
+
+---
+
+## Dati
+
+### Rakstzīmju kopa
+
+`alphabet.py` satur 129 rakstzīmes + `blank` (indekss 0), kopā **130 klases**:
+
+- latviešu burti ar diakritiskajām zīmēm (`ā č ē ģ ī ķ ļ ņ š ū ž`), lielie un mazie;
+- `q w x y` (un lielie);
+- cipari `0–9`;
+- atstarpe, pieturzīmes, pēdiņas (arī `„ “ ” « »`), domuzīmes, iekavas, simboli, `€ $ № …`;
+- speciālais simbols **`¤`** (`STRIKE_MARK`) — norāda **pārsvītrotu vārdu**.
+
+Funkcija `strip_struck(text)` noņem `¤` no gala teksta (`"Ekonomika ¤ tirgus"` → `"Ekonomika tirgus"`).
+
+Ja teksts satur rakstzīmi ārpus šīs kopas, `encode` izmet `ValueError`.
+
+### Reālie dati
+
+Atrodas `latvian_htr/data/real_dataset/`:
+
+```text
+data/real_dataset/
+├── labels.csv          # kolonnas: filename,text
+├── corpus.txt          # latviešu teksts sintētisko datu vārdu avotam
+└── images/
+    ├── 0001.png
+    └── ...
+```
+
+Pašlaik: **143 marķētas teksta rindas** (kopā ≈ 5700 rakstzīmju), katrs attēls ir viena rinda.
+
+`labels.csv` formāts (UTF-8):
+
+```csv
+filename,text
+0001.png,Ekonomika izdala (3 vai 4) tirgus dalībniekus
+0002.png,"1,3,5,7 - reala ekonomika"
+```
+
+Teksts nedrīkst saturēt rakstzīmes ārpus alfabēta. Pārsvītrotu vārdu marķēšanai izmanto `¤`.
+
+### Sintētiskie dati
+
+`synthetic_data.py` katru reizi ģenerē jaunu piemēru:
+
+1. izvēlas fontu no `fonts/` (ap 20 fontu) un tekstu, ko šis fonts **pilnībā** spēj uzzīmēt (`font_charset` izslēdz rakstzīmes, kurām fontā nav glifa);
+2. salasa nejaušu «rindu» no vārdiem (ap 7 % gadījumu — skaitļi);
+3. 80 % rindu zīmē **burtu pa burtam** ar nelielām izmēra, augstuma un slīpuma svārstībām; puse no tām ar savienotiem burtiem (kursīvs);
+4. 20 % rindu satur pārsvītrotus vārdus (4 veidi: līnija, murgojums, krusti, vairākas līnijas), kas etiķetē tiek aizvietoti ar `¤`;
+5. pievieno burtnīcas lapas foto imitāciju: rūtiņu papīru, nevienmērīgu apgaismojumu, viļņainu rindu, troksni un izplūdumu.
+
+Sintētiskie dati ir paredzēti, lai modelis varētu mācīties, kamēr trūkst reālā rokraksta. **Tie neaizvieto īstu cilvēku rokrakstu.**
+
+---
+
+## Web lietotne
+
+React + Vite + TypeScript lietotne mapē `web-app/`. Visi lietotāja teksti ir latviešu valodā (`src/i18n/lv.ts`); izstrādātāju dokumentācija ir angļu valodā failā [`web-app/README.md`](web-app/README.md).
+
+**Lietotāja ceļš:** izvēlēties attēlu vai uzņemt foto → priekšskatījums (var pagriezt) → **Atpazīt tekstu** → progress ar atcelšanu → rezultāts, ko var labot → **Kopēt tekstu**.
+
+Svarīgākais:
+
+- attēls pārlūkā tiek pagriezts, samazināts līdz 1920 × 1080 (portretā 1080 × 1920) un pārvērsts par JPEG;
+- atpazīšanas laika limits — 60 s;
+- vārdi ar ticamību zem 70 % tiek izcelti; izcēlums pazūd, kad vārds tiek labots;
+- pēc veiksmīgas atpazīšanas attēls tiek dzēsts no atmiņas, paliek tikai teksts;
+- izstrādātāja panelis: pievieno adresei `?dev=1`.
+
+### Kā pieslēgt reālo modeli
+
+Saskarne ar atpazīšanu ir atdalīta ar interfeisu `HandwritingRecognitionService` (`src/recognition/types.ts`): metode `recognize(image: Blob, { signal })` atgriež `{ text, words: [{ text, confidence }] }`. Lai savienotu ar Python modeli:
+
+1. izveidot backend API (piem., Python serveris, kas pieņem JPEG, palaiž `infer.py` loģiku un atgriež JSON);
+2. uzrakstīt jaunu klasi, kas implementē šo interfeisu un izsauc API;
+3. izvēlēties to failā `src/recognition/createRecognitionService.ts` (šobrīd tur atgriezts `MockRecognitionService`).
+
+Kļūdām jāizmanto kodi no `src/recognition/errors.ts`.
+
+> Esošais modelis atgriež tekstu bez ticamības vērtībām katram vārdam; šīs vērtības (`confidence`) backend pusē vēl jāimplementē.
+
+---
+
+## Projekta struktūra
 
 ```text
 LVRA/
+├── README.md
+├── Proekta-skaidrošana.md        # detalizēts modeļa skaidrojums (krievu val., daļēji novecojis)
 │
-├── latvian_htr/
-│   ├── alphabet.py
-│   ├── dataset.py
-│   ├── infer.py
-│   ├── model.py
+├── latvian_htr/                  # Python daļa
+│   ├── alphabet.py               # rakstzīmju kopa, kodēšana, dekodēšana
+│   ├── model.py                  # CRNN
+│   ├── dataset.py                # datu kopas un batch veidošana
+│   ├── synthetic_data.py         # sintētisko attēlu ģenerators
+│   ├── train.py                  # apmācība
+│   ├── infer.py                  # viena attēla atpazīšana
+│   ├── evaluate.py               # CER novērtēšana
 │   ├── requirements.txt
-│   ├── synthetic_data.py
-│   └── train.py
+│   ├── fonts/                    # fonti sintētiskajiem datiem
+│   ├── checkpoints_v2/           # apmācītā modeļa svari (crnn_step30000.pt, ≈ 35 MB)
+│   └── data/real_dataset/        # reālie dati (labels.csv, images/, corpus.txt)
 │
-├── samples/
-│   └── sample_*.png
-│
-├── web-app/
+├── web-app/                      # React/Vite lietotne
 │   ├── src/
+│   │   ├── app/                  # ekrānu stāvoklis
+│   │   ├── components/           # UI komponentes
+│   │   ├── image/                # attēla apstrāde pārlūkā
+│   │   ├── recognition/          # atpazīšanas interfeiss, mock serviss, kļūdas
+│   │   ├── editor/, utils/       # rezultāta labošana un kopēšana
+│   │   ├── i18n/lv.ts            # visi lietotāja teksti
+│   │   └── config/config.ts      # fiksētās vērtības (limiti, sliekšņi)
 │   ├── public/
-│   ├── package.json
-│   └── vite.config.ts
+│   └── package.json
 │
-└── README.md
+└── web-app_easter-egg/           # web-app variants ar paslēptu «easter egg»; darbam nav nepieciešams
 ```
 
 ---
 
-# Kas vēl jāuzlabo
+## Zināmie ierobežojumi
 
-Alpha versija vēl nav gala sistēma. Svarīgākie nākamie soļi:
-
-### 1. Lielāka reālo rokraksta datu kopa
-
-Pašlaik sintētiskie dati nevar pilnībā aizvietot īstu cilvēku rokrakstu.
-
-Nepieciešami:
-
-* dažādu cilvēku rokraksti;
-* dažādi rakstīšanas stili;
-* dažādi pildspalvas veidi;
-* dažāds rakstīšanas ātrums;
-* dažādi papīra veidi;
-* dažādas fotografēšanas un skenēšanas kvalitātes.
-
-### 2. Reālā rokraksta augmentācija
-
-Var pievienot:
-
-* papīra tekstūru;
-* tintes izplūšanu;
-* ēnas;
-* fotografēšanas troksni;
-* perspektīvas deformācijas;
-* apgaismojuma izmaiņas;
-* nelielu izplūšanu.
-
-### 3. Modeļa kvalitātes mērīšana
-
-Jāpievieno objektīvi rādītāji, piemēram:
-
-* CER — Character Error Rate;
-* WER — Word Error Rate.
-
-Tas ļaus salīdzināt:
-
-```text
-Greedy
-vs.
-Beam Search
-```
-
-un izmērīt, vai Beam Search patiešām uzlabo atpazīšanas kvalitāti.
-
-### 4. Web lietotnes savienošana ar modeli
-
-Nākamais lielais solis ir izveidot backend API:
-
-```text
-Web app
-   ↓
-HTTP API
-   ↓
-Python / PyTorch
-   ↓
-CRNN
-   ↓
-Beam Search
-   ↓
-JSON ar atpazīto tekstu
-   ↓
-Web app
-```
-
-Tad lietotājs varēs augšupielādēt īstu rokraksta foto un saņemt reālu modeļa rezultātu.
-
-### 5. Labāks checkpoint/resume mehānisms
-
-Pilnvērtīgai ilgstošai apmācībai vēlams saglabāt ne tikai modeļa svarus, bet arī:
-
-* optimizer stāvokli;
-* pašreizējo `step`;
-* scheduler stāvokli, ja tas tiks pievienots;
-* citus apmācības parametrus.
-
-Tas ļaus pilnībā turpināt apmācību no iepriekšējā stāvokļa.
+- **Web lietotne neizmanto reālo modeli** — rezultāts ir fiksēts demonstrācijas teksts.
+- **Maz reālu datu:** 143 rindas ir ļoti maz, lai modelis labi vispārinātu uz dažādiem rokrakstiem. Sintētiskie dati nav īsts rokraksts.
+- **Korpusa ceļš:** `synthetic_data.load_words()` meklē vārdus failā `latvian_htr/data/corpus.txt`, bet korpuss šobrīd atrodas `latvian_htr/data/real_dataset/corpus.txt`. Ja pirmā faila nav, tiek izmantots neliels iebūvēts vārdu saraksts — sintētiskie dati kļūst mazāk daudzveidīgi. Risinājums: pārvietot vai nokopēt failu uz `latvian_htr/data/corpus.txt`, vai nomainīt ceļu kodā.
+- **Viena rinda uz attēlu:** nav automātiskas teksta zonu vai rindu atdalīšanas pilnai lapai.
+- **CTC garuma ierobežojums:** izvades garums `T = W / 2` nedrīkst būt mazāks par teksta garumu; pārāk šauri attēli ar garu tekstu netiks pareizi apmācīti (`train.py` par to brīdina).
+- **`--resume`** atjauno tikai svarus, nevis pilnu apmācības stāvokli.
+- **Novērtēšana** šobrīd tikai CER ar greedy dekodēšanu; WER un Beam Search novērtējuma nav.
+- **Fontu licences:** pirms projekta publiskas izplatīšanas jāpārbauda mapē `fonts/` esošo fontu licences.
+- `web-app/package.json` satur tikai skriptus `dev` un `dev:phone` (nav `build`).
 
 ---
 
-# Alpha versijas statuss
+## Ceļvedis
 
-| Funkcija                          | Statuss |
-| --------------------------------- | ------- |
-| Latviešu alfabēts                 | ✅       |
-| Sintētisko datu ģenerēšana        | ✅       |
-| Reālo datu ielāde                 | ✅       |
-| CNN                               | ✅       |
-| 2×BiLSTM                          | ✅       |
-| Linear + CTC                      | ✅       |
-| Mainīga attēlu platuma apstrāde   | ✅       |
-| Individuālie `input_lengths`      | ✅       |
-| Greedy decoding                   | ✅       |
-| CTC Prefix Beam Search            | ✅       |
-| `beam-width` konfigurācija        | ✅       |
-| GPU/CUDA atbalsts                 | ✅       |
-| Checkpoint saglabāšana            | ✅       |
-| Viena attēla inference            | ✅       |
-| React web lietotne                | ✅       |
-| Web lietotnes UI latviešu valodā  | ✅       |
-| Web lietotnes savienojums ar CRNN | ❌       |
-| Liela reāla rokraksta datu kopa   | ❌       |
-| CER/WER automātiska novērtēšana   | ❌       |
-| Gala produkta kvalitāte           | ❌       |
+1. Savākt un marķēt lielāku, daudzveidīgāku reālā rokraksta datu kopu (dažādi cilvēki, pildspalvas, papīrs, foto kvalitāte).
+2. Atdalīt validācijas kopu no apmācības un regulāri mērīt CER.
+3. Pievienot WER un salīdzināt Greedy ar Beam Search.
+4. Papildināt augmentāciju reālajiem datiem (papīra tekstūra, ēnas, perspektīva, apgaismojums).
+5. Izveidot backend API un savienot web lietotni ar modeli.
+6. Saglabāt checkpoint ar optimizētāja un soļu stāvokli, lai apmācību varētu pilnībā atsākt.
+7. Nākotnē — rindu atdalīšana, lai atpazītu visu lapu.
 
-**Pašreizējais galvenais mērķis:** izveidot pietiekami lielu un daudzveidīgu reāla latviešu rokraksta datu kopu, lai CRNN+CTC modeli varētu apmācīt uz reāla rokraksta, izmērīt CER/WER un pēc tam savienot modeli ar web lietotni.
+---
+
+## Papildu dokumentācija
+
+- [`web-app/README.md`](web-app/README.md) — web lietotnes uzbūve, izstrādātāja panelis, ierobežojumi (angļu val.).
+- [`Proekta-skaidrošana.md`](Proekta-skaidrošana.md) — padziļināts modeļa skaidrojums (krievu val.). **Uzmanību:** tas apraksta agrāku versiju (attēla augstums 32 px, vienāds `T` visam batch, tikai greedy dekodēšana), tāpēc daļa detaļu vairs neatbilst kodam; autoritatīvs avots ir pats kods un šis README.
+
+---
+
+## Komanda un licence
+
+Projektu izstrādā komanda **Slepie**. Licence pašlaik nav norādīta.
