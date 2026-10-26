@@ -35,7 +35,11 @@ PUNCT = (
 # - set(...) noņem atkārtojumus (ja kāds burts parādās divreiz);
 # - sakārtots(...) sakārto rakstzīmes tā, lai cipari vienmēr būtu
 # izrādījās vienādi katru reizi, kad programma tika palaista.
-CHARS = sorted(set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + PUNCT))
+# Īpašs simbols: "šis vārds ir pārsvītrots". Viens simbols = viens pārsvītrots vārds (tīkls to "raksta" tā vietā).
+# Fontos tā nav, to nekad nezīmē - tas parādās tikai atbildē (etiķetē).
+STRIKE_MARK = "\u00a4"   # ¤
+
+CHARS = sorted(set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + PUNCT + STRIKE_MARK))
 
 BLANK = "<blank>"
 
@@ -163,3 +167,9 @@ def decode_beam_search(log_probs, beam_width: int = 5) -> str:
         key=lambda prefix: log_add(beams[prefix][0], beams[prefix][1]),
     )
     return "".join(IDX_TO_CHAR[i] for i in best_prefix)
+
+
+def strip_struck(text: str) -> str:
+    """Noņem pārsvītroto vārdu atzīmes (¤) no atpazītā teksta un sakārto atstarpes.
+    "Ekonomika ¤ tirgus" -> "Ekonomika tirgus" """
+    return " ".join(text.replace(STRIKE_MARK, " ").split())
