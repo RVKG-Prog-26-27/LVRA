@@ -1,18 +1,31 @@
 """
-Synthetic data generator (v2).
+Synthetic data generator (v3).
 
-What changed vs. v1 (see notes in the chat):
-  * TARGET_HEIGHT 32 -> 64 and the text is rendered BIG and downscaled, so letters
-    (and diacritics) stay readable. v1 gave ~5 px per character.
-  * The canvas height comes from font metrics, not from the text's own bounding box,
-    so letter size no longer changes from line to line.
-  * Texts are random word sequences (random_line), not a few fixed lines.
-  * Augmentation mimics photos of notebook pages: grid paper, grey/uneven light,
-    wavy baseline, thicker/thinner ink, noise, blur.
+What changed vs. v2:
+  * CORRECTIONS ABOVE CROSSED-OUT WORDS, like in real handwriting. A struck word can now be a
+    "mistake" (typo, missing / wrong diacritic, swapped or doubled letter, wrong digit, another word):
+    it is drawn and crossed out, and the RIGHT word is written smaller above it. The label holds the
+    right word at that position (the model must learn: struck word + text above -> read the text above).
+    Struck words without a correction keep the old behaviour (STRIKE_MODE 'mark' / 'skip').
+    Punctuation stays outside the strike: "valodu." -> "valudu." with only "valudu" struck, "valodu" above.
+  * Speed: glyph masks, stem width and x-height are cached (before: every letter of every line was
+    rendered twice from scratch); the wavy-baseline warp is vectorised; the corpus filter per font is cached.
+  * Noise / blur / JPEG artefacts are applied AFTER the downscale to 64 px. Before, the 3-4x downscale
+    averaged most of the noise and blur away, so the model rarely saw a really noisy line.
+  * All randomness goes through `random` (numpy noise uses a generator seeded from it): one random.seed()
+    makes a dataset reproducible, and DataLoader workers no longer repeat the same numpy noise.
+  * Ruled (lined) notebook paper in addition to grid paper.
+  * Fixes: random_tokens could fall back to a word the font cannot draw; font_charset now also rejects
+    glyphs that render empty; a missing glyph in the middle of a word no longer makes the next letter
+    jump back onto the word start; word indices stay in sync even if a word has no drawable glyphs.
+
+v2 (kept): TARGET_HEIGHT 64, big rendering + downscale, metric-based line height, random word lines,
+notebook-photo augmentation, letter-by-letter "handwritten" rendering, roman numerals, strike-outs.
 """
 
 import functools
 import glob
+import io
 import math
 import os
 import random
@@ -51,9 +64,11 @@ FALLBACK_FONT = _find_fallback_font()
 TARGET_HEIGHT = 64  # fixed line height fed into the CNN (model.py expects exactly 64)
 
 
+@functools.lru_cache(maxsize=1)
 def _available_fonts() -> list[str]:
+    """Fonts in fonts/ (scanned once per process, not for every sample)."""
     fonts = glob.glob(os.path.join(FONT_DIR, "*.ttf")) + glob.glob(os.path.join(FONT_DIR, "*.otf"))
-    return fonts if fonts else [FALLBACK_FONT]
+    return sorted(fonts) if fonts else [FALLBACK_FONT]
 
 
 def _glyph_bytes(font: ImageFont.FreeTypeFont, ch: str) -> bytes:
@@ -62,17 +77,23 @@ def _glyph_bytes(font: ImageFont.FreeTypeFont, ch: str) -> bytes:
     return img.tobytes()
 
 
+_EMPTY_GLYPH = bytes(100 * 100)
+
+
 @functools.lru_cache(maxsize=None)
 def font_charset(font_path: str) -> frozenset:
     """Which characters of our alphabet this font can really draw.
-    A missing glyph is drawn as an empty box (.notdef) while the label keeps the real letter -
-    the network would then learn 'box = a / ā / š / ž ...', which is impossible. So we never
+    A missing glyph is drawn as an empty box (.notdef) or as nothing at all, while the label keeps the real
+    letter - the network would then learn 'box = a / ā / š / ž ...', which is impossible. So we never
     put such characters into texts rendered with this font."""
     font = ImageFont.truetype(font_path, 48)
     notdef = _glyph_bytes(font, "\uFFFF")
     ok = {" "}
     for ch in ALPHABET[1:]:  # [0] is the CTC blank
-        if ch != " " and _glyph_bytes(font, ch) != notdef:
+        if ch == " ":
+            continue
+        b = _glyph_bytes(font, ch)
+        if b != notdef and b != _EMPTY_GLYPH:
             ok.add(ch)
     return frozenset(ok)
 
@@ -172,13 +193,32 @@ def _random_number() -> str:
     return random.choice([str(a), f"{a},{b}", f"({a})", f"{a}.", f"{a}%", f"{b})", f"{a} - {b}"])
 
 
+# Filtering a big corpus for every sample is O(corpus); the result only depends on (word list, font charset).
+_WORDS_CACHE: dict = {}
+
+
+def _words_for(words: list[str], allowed: frozenset) -> list[str]:
+    key = (id(words), allowed)
+    hit = _WORDS_CACHE.get(key)
+    if hit is None or hit[0] is not words or hit[1] != len(words):
+        hit = (words, len(words), [w for w in words if set(w) <= allowed])
+        _WORDS_CACHE[key] = hit
+    return hit[2]
+
+
+def _safe_token(allowed) -> str:
+    """Last-resort token that the font can surely draw."""
+    if allowed is None:
+        return "a"
+    pool = sorted(c for c in allowed if c.isalnum())
+    return "".join(random.choice(pool) for _ in range(random.randint(1, 4))) if pool else "0"
+
+
 def random_tokens(words: list[str], max_chars: int = 60, allowed=None) -> list[str]:
     """A random 'handwritten line' as a list of tokens (words/numbers), 6..max_chars characters long.
     `allowed` - set of characters the font can draw; words/numbers with other characters are skipped."""
     if allowed is not None:
-        words = [w for w in words if set(w) <= allowed] or [w for w in words if set(w) <= allowed | set("0123456789")]
-        if not words:
-            words = ["a"]
+        words = _words_for(words, frozenset(allowed))
     target = random.randint(6, max_chars)
     parts: list[str] = []
     length = 0
@@ -186,7 +226,7 @@ def random_tokens(words: list[str], max_chars: int = 60, allowed=None) -> list[s
     while length < target and guard < 200:
         guard += 1
         r = random.random()
-        if r < 0.07:
+        if r < 0.07 or not words:
             w = _random_number()
         elif r < 0.07 + ROMAN_PROB:
             w = _roman_token()
@@ -201,45 +241,174 @@ def random_tokens(words: list[str], max_chars: int = 60, allowed=None) -> list[s
             continue
         parts.append(w)
         length += extra
-    return parts if parts else [random.choice(words)[:max_chars]]
+    if parts:
+        return parts
+    return [random.choice(words)[:max_chars]] if words else [_safe_token(allowed)]
 
 
 def random_line(words: list[str], max_chars: int = 60, allowed=None) -> str:
     return " ".join(random_tokens(words, max_chars, allowed))
 
 
+# --------------------------------------------------------------------------- mistakes for corrections
+
+CORRECTION_PROB = 0.6        # share of crossed-out words that get the right word written above them
+CORRECTION_SCALE = (0.55, 0.8)   # size of the correction relative to the line's font size
+# kind of mistake that was crossed out
+MISTAKE_WEIGHTS = {"diacritic": 0.28,  # rīga -> riga, skola -> skoļa
+                   "confuse": 0.22,    # a<->o, e<->i, n<->m, 3<->8 ...
+                   "drop": 0.14,       # missing letter
+                   "double": 0.12,     # doubled letter
+                   "swap": 0.12,       # two neighbours swapped
+                   "word": 0.12}       # a different word altogether
+# strike style used for a word that is corrected (people mostly just draw a line through a mistake)
+CORRECTION_STRIKE_WEIGHTS = {"line": 0.5, "multi": 0.25, "scribble": 0.2, "cross": 0.05}
+
+_DIACRITIC_PAIRS = ["aā", "cč", "eē", "gģ", "iī", "kķ", "lļ", "nņ", "sš", "uū", "zž"]
+_DIACRITIC = {}
+for _p in _DIACRITIC_PAIRS:
+    for _a, _b in ((_p[0], _p[1]), (_p[1], _p[0]), (_p[0].upper(), _p[1].upper()), (_p[1].upper(), _p[0].upper())):
+        _DIACRITIC[_a] = _b
+_CONFUSABLE = ["ao", "ei", "uv", "nm", "sz", "td", "kg", "bp", "lt", "rn", "ce", "hn", "uo",
+               "17", "38", "56", "09", "24", "35"]
+_CONFUSE = {}
+for _g in _CONFUSABLE:
+    for _c in _g:
+        _CONFUSE.setdefault(_c, set()).update(set(_g) - {_c})
+
+
+def _split_token(tok: str) -> tuple[str, str, str]:
+    """'(valodu.)' -> ('(', 'valodu', '.)'): leading punctuation, core, trailing punctuation."""
+    m = re.match(r"^(\W*)(.*?)(\W*)$", tok)
+    return m.group(1), m.group(2), m.group(3)
+
+
+def _misspell(core: str, allowed, words: list[str]) -> str | None:
+    """A plausible wrong version of `core` that the font can draw, or None."""
+    is_roman = bool(_ROMAN_RE.match(core))
+    for _ in range(12):
+        if is_roman:      # roman numerals: wrong / missing / extra / swapped symbol, never diacritics
+            op = random.choice(["roman", "roman", "drop", "double", "swap"])
+        else:
+            op = _pick(MISTAKE_WEIGHTS)
+        ch = list(core)
+        idx = [i for i, c in enumerate(ch) if c.isalnum()]
+        if not idx:
+            return None
+        if op == "roman":
+            i = random.choice(idx)
+            new = random.choice([c for c in "IVXLC" if c != ch[i].upper()])
+            ch[i] = new.lower() if ch[i].islower() else new
+        elif op == "drop" and is_roman:
+            if len(idx) < 2:
+                continue
+            del ch[random.choice(idx)]
+        elif op == "diacritic":
+            cand = [i for i in idx if ch[i] in _DIACRITIC]
+            if not cand:
+                continue
+            i = random.choice(cand)
+            ch[i] = _DIACRITIC[ch[i]]
+        elif op == "confuse":
+            cand = [i for i in idx if ch[i].lower() in _CONFUSE]
+            if not cand:
+                continue
+            i = random.choice(cand)
+            new = random.choice(sorted(_CONFUSE[ch[i].lower()]))
+            ch[i] = new.upper() if ch[i].isupper() else new
+        elif op == "drop":
+            if len(idx) < 3:
+                continue
+            del ch[random.choice(idx)]
+        elif op == "double":
+            i = random.choice(idx)
+            ch.insert(i, ch[i])
+        elif op == "swap":
+            pairs = [i for i in idx if i + 1 < len(ch) and ch[i + 1].isalnum() and ch[i] != ch[i + 1]]
+            if not pairs:
+                continue
+            i = random.choice(pairs)
+            ch[i], ch[i + 1] = ch[i + 1], ch[i]
+        else:  # "word": the writer started a different word
+            if not words or not core.isalpha():
+                continue
+            other = _split_token(random.choice(words))[1]
+            if not other.isalpha() or abs(len(other) - len(core)) > 3:
+                continue
+            ch = list(other.capitalize() if core[0].isupper() else other.lower())
+        wrong = "".join(ch)
+        if wrong and wrong != core and (allowed is None or set(wrong) <= allowed):
+            return wrong
+    return None
+
+
+def _make_fix(tok: str, allowed, words: list[str]):
+    """(drawn_token, correction, (a, b)) - the mistake to draw, the right core written above it and the
+    character span of the mistake inside the drawn token (only that span is crossed out). None if impossible."""
+    lead, core, trail = _split_token(tok)
+    if not core or not any(c.isalnum() for c in core):
+        return None
+    wrong = _misspell(core, allowed, words)
+    if wrong is None:
+        return None
+    a = len(lead)
+    return lead + wrong + trail, core, (a, a + len(wrong))
+
+
+def _pick(weights: dict) -> str:
+    return random.choices(list(weights), weights=list(weights.values()))[0]
+
+
 def _pick_strike() -> str:
-    return random.choices(list(STRIKE_WEIGHTS), weights=list(STRIKE_WEIGHTS.values()))[0]
+    return _pick(STRIKE_WEIGHTS)
 
 
 def make_sample(words: list[str], max_chars: int = 60, augment: bool = True) -> tuple[Image.Image, str]:
     """Pick a random font, build a text this font can fully draw, render it. Returns (image, label).
-    Some lines get crossed-out words (STRIKE_LINE_PROB). Label: STRIKE_MODE 'mark' -> the struck word is
-    replaced by STRIKE_MARK (¤); 'skip' -> the struck word is simply missing from the label."""
+    Some lines get crossed-out words (STRIKE_LINE_PROB). A crossed-out word is either
+      * a mistake with the right word written above it (CORRECTION_PROB) -> label has the right word, or
+      * just struck -> STRIKE_MODE 'mark': label has STRIKE_MARK (¤); 'skip': the word is missing from the label."""
     fonts = _available_fonts()
     font_path = random.choice(fonts)
     allowed = font_charset(font_path)
+    pool = _words_for(words, allowed)
     tokens = random_tokens(words, max_chars, allowed)
 
-    kinds: list = [None] * len(tokens)
-    if len(tokens) >= 2 and random.random() < STRIKE_LINE_PROB:
-        k = min(len(tokens) - 1, random.choice([1, 1, 1, 2, 2, 3]))      # always leave some real text
-        for i in random.sample(range(len(tokens)), k):
-            if " " not in tokens[i]:                                      # not the multi-word numbers
-                kinds[i] = _pick_strike()
+    n = len(tokens)
+    kinds: list = [None] * n
+    fixes: list = [None] * n
+    if n >= 2 and random.random() < STRIKE_LINE_PROB:
+        k = min(n - 1, random.choice([1, 1, 1, 2, 2, 3]))      # always leave some real text
+        for i in random.sample(range(n), k):
+            if " " in tokens[i]:                                 # not the multi-word numbers
+                continue
+            if random.random() < CORRECTION_PROB:
+                fixes[i] = _make_fix(tokens[i], allowed, pool)
+            kinds[i] = _pick(CORRECTION_STRIKE_WEIGHTS) if fixes[i] else _pick_strike()
 
-    text = " ".join(tokens)
-    word_kinds = [kd for tok, kd in zip(tokens, kinds) for _ in tok.split()]   # one entry per drawn word
-    if STRIKE_MODE == "mark":
-        label = " ".join(STRIKE_MARK if kd else tok for tok, kd in zip(tokens, kinds))
-    else:
-        label = " ".join(tok for tok, kd in zip(tokens, kinds) if not kd)
-    word_roman = [bool(_ROMAN_RE.match(tok)) for tok in tokens for _ in tok.split()]
-    img = render_text_line(text, font_path=font_path, augment=augment, struck=word_kinds, roman=word_roman)
+    drawn = [fx[0] if fx else tok for tok, fx in zip(tokens, fixes)]
+    text = " ".join(drawn)
+
+    word_kinds, word_fixes, word_roman = [], [], []          # one entry per drawn word
+    for tok, dtok, kd, fx in zip(tokens, drawn, kinds, fixes):
+        is_roman = bool(_ROMAN_RE.match(tok))
+        for _ in dtok.split():
+            word_kinds.append(kd)
+            word_fixes.append((fx[1], fx[2]) if fx else None)
+            word_roman.append(is_roman)
+
+    label_parts = []
+    for tok, kd, fx in zip(tokens, kinds, fixes):
+        if fx or not kd:
+            label_parts.append(tok)                 # corrected word -> the right word; normal word -> itself
+        elif STRIKE_MODE == "mark":
+            label_parts.append(STRIKE_MARK)
+    label = " ".join(label_parts)
+
+    img = render_text_line(text, font_path=font_path, augment=augment, struck=word_kinds,
+                           roman=word_roman, fixes=word_fixes)
     return img, label
 
-
-# --------------------------------------------------------------------------- rendering
 
 # --------------------------------------------------------------------------- handwritten look
 # Letter-by-letter rendering that imitates a real hand:
@@ -248,7 +417,8 @@ def make_sample(words: list[str], max_chars: int = 60, augment: bool = True) -> 
 #   * spacing depends on the SHAPES of the two neighbours (silhouette 'kerning'): round letters nest closer,
 #     tall / overhanging ones keep more distance; every word also gets its own spacing style;
 #   * neighbouring letters of a word can be joined with a pen stroke (cursive);
-#   * punctuation is much sloppier than letters: bigger size / position / tilt scatter, wilder gaps.
+#   * punctuation is much sloppier than letters: bigger size / position / tilt scatter, wilder gaps;
+#   * crossed-out mistakes get the right word written smaller above them.
 
 HANDWRITTEN_PROB = 0.8   # share of lines drawn letter-by-letter (the rest = plain font rendering)
 CONNECT_PROB = 0.5       # of those, share of lines whose letters are joined by strokes
@@ -256,7 +426,7 @@ JOIN_PROB = 0.85         # in a joined line: chance that two neighbouring letter
 
 # crossed-out words (people strike words out when they write)
 STRIKE_LINE_PROB = 0.2    # share of lines that contain at least one crossed-out word
-STRIKE_MODE = "mark"      # "mark": label gets STRIKE_MARK (¤) in place of the word; "skip": word is left out
+STRIKE_MODE = "mark"      # struck word WITHOUT correction: "mark" -> STRIKE_MARK (¤) in the label; "skip" -> left out
 STRIKE_WEIGHTS = {"line": 0.35,       # one line through the word
                   "scribble": 0.25,   # word smeared over with dense zigzag / coil strokes
                   "cross": 0.20,      # one cross (X) fitted to the word
@@ -265,10 +435,10 @@ STRIKE_WEIGHTS = {"line": 0.35,       # one line through the word
 # scatter strengths. scale/dy are relative (dy in font sizes), rot in degrees
 LETTER_JITTER = {"scale": 0.07, "dy": 0.03, "rot": 4.0, "gap": 0.03}
 PUNCT_JITTER = {"scale": 0.25, "dy": 0.12, "rot": 20.0, "gap": (-0.05, 0.28)}
-WORD_GAP_RANGE = (0.05, 0.15)      # base distance between letters of a word (in font sizes), per word
+WORD_GAP_RANGE = (0.03, 0.15)      # base distance between letters of a word (in font sizes), per word
 
 
-@functools.lru_cache(maxsize=512)
+@functools.lru_cache(maxsize=1024)
 def _load_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(font_path, size)
 
@@ -287,9 +457,20 @@ def _glyph_mask(font: ImageFont.FreeTypeFont, ch: str, fs: int):
     return arr[y0:y1, x0:x1], int(x0 - ox), int(y0 - oy)
 
 
-def _stem_width(font: ImageFont.FreeTypeFont, fs: int) -> int:
+@functools.lru_cache(maxsize=60000)
+def _glyph(font_path: str, fs: int, ch: str):
+    """Cached _glyph_mask. The mask is read-only: callers must copy before changing it."""
+    g = _glyph_mask(_load_font(font_path, fs), ch, fs)
+    if g is not None:
+        g = (np.ascontiguousarray(g[0]), g[1], g[2])
+        g[0].setflags(write=False)
+    return g
+
+
+@functools.lru_cache(maxsize=4096)
+def _stem_width(font_path: str, fs: int) -> int:
     """Pen thickness of the font = width of the vertical stem of 'l'."""
-    g = _glyph_mask(font, "l", fs)
+    g = _glyph(font_path, fs, "l")
     if g is None:
         return max(2, int(fs * 0.06))
     mask = g[0]
@@ -297,14 +478,22 @@ def _stem_width(font: ImageFont.FreeTypeFont, fs: int) -> int:
     return int(min(max(2, row.sum()), fs * 0.12))
 
 
-def _transform(mask: np.ndarray, top: int, scale: float, rot: float):
-    """Scale the glyph around the pen origin and tilt it around its centre. Returns (mask, top)."""
+@functools.lru_cache(maxsize=4096)
+def _x_height(font_path: str, fs: int) -> int:
+    g = _glyph(font_path, fs, "x")
+    return g[0].shape[0] if g is not None else int(fs * 0.5)
+
+
+def _transform(mask: np.ndarray, top: int, scale: float, rot: float, around_centre: bool = False):
+    """Scale the glyph around the pen origin (or around its own centre) and tilt it around its centre.
+    Returns (mask, top)."""
     img = Image.fromarray(mask)
     h, w = mask.shape
     if abs(scale - 1) > 0.01:
         nw, nh = max(1, round(w * scale)), max(1, round(h * scale))
         img = img.resize((nw, nh), Image.BILINEAR)
-        top, w, h = round(top * scale), nw, nh
+        top = top + (h - nh) / 2 if around_centre else round(top * scale)
+        w, h = nw, nh
     if abs(rot) > 0.3:
         img = img.rotate(rot, expand=True, resample=Image.BILINEAR)
         nw, nh = img.size
@@ -357,9 +546,61 @@ def _bezier(p0, p1, ctrl, n=14):
             for t in np.linspace(0, 1, n)]
 
 
-def _x_height(font: ImageFont.FreeTypeFont, fs: int) -> int:
-    g = _glyph_mask(font, "x", fs)
-    return g[0].shape[0] if g is not None else int(fs * 0.5)
+SMALL_PUNCT = set(",.;:'\"\u201e\u201c\u201d\u2018\u2019")   # marks that fonts draw as tiny specks
+PEN_PUNCT = set(".,;:")      # these four are drawn with our own pen (size follows the pen / font size)
+PUNCT_MIN_SIZE = 0.16        # quotes: smallest size, in font sizes
+# scatter of the small marks: clearly looser than letters, but a dot must never fly away or turn into a blot
+SMALL_JITTER = {"scale": 0.15, "dy": 0.035, "rot": 12.0, "gap": (-0.02, 0.16)}
+
+
+def _boost_small(mask: np.ndarray, top: int, stem: int, fs: int):
+    """Quotes in a font are tiny and vanish under blur/noise: enlarge them a little (around their OWN centre,
+    so a raised quote stays raised) and thicken thin pens. Size is capped relative to the font size."""
+    h, w = mask.shape
+    target = min(max(stem * 1.8, PUNCT_MIN_SIZE * fs), 0.22 * fs) * random.uniform(1.0, 1.25)
+    cur = max(h, w)
+    if cur < target:
+        k = min(target / cur, 2.0)
+        nh, nw = max(1, round(h * k)), max(1, round(w * k))
+        mask = np.array(Image.fromarray(mask).resize((nw, nh), Image.BILINEAR))
+        top = int(round(top + (h - nh) / 2))
+    ratio = stem / fs
+    n = 0 if ratio >= 0.07 else (1 if ratio >= 0.04 else 2)
+    img = Image.fromarray(np.pad(mask, n))
+    for _ in range(n):
+        img = img.filter(ImageFilter.MaxFilter(3))
+    return np.array(img), top - n
+
+
+def _pen_punct(ch: str, stem: int, fs: int, xh: int):
+    """Draw . , ; : with a pen. The dot is as thick as the pen of this font (stem), clamped to a sensible share
+    of the x-height, so every font gets dots that fit it: not specks, not blots. Returns (mask, top)."""
+    d = float(np.clip(stem * random.uniform(1.2, 1.7), 0.18 * xh, 0.30 * xh))     # follows the pen, bounded by x-height
+    d = max(d, 3.0)
+    low = -d / 2 + random.gauss(0, 0.012 * fs)                    # lower dot sits on the baseline
+    high = -random.uniform(0.45, 0.7) * xh                        # upper dot of : and ; at x-height
+    dots = {".": [("dot", low)], ",": [("comma", low)],
+            ":": [("dot", high), ("dot", low)], ";": [("dot", high), ("comma", low)]}[ch]
+    tail = d * random.uniform(1.4, 2.3)
+    top = min(cy for _, cy in dots) - d / 2 - 1
+    bottom = max(cy for _, cy in dots) + d / 2 + (tail if any(k == "comma" for k, _ in dots) else 0) + 1
+    ss = 3                                                        # supersampling = smooth edges
+    W, H = int(d * 2 + 4), int(bottom - top) + 2
+    img = Image.new("L", (W * ss, H * ss), 0)
+    draw = ImageDraw.Draw(img)
+    cx = W * ss / 2
+    for kind, cy in dots:
+        y = (cy - top) * ss
+        rx, ry = d / 2 * ss * random.uniform(0.9, 1.1), d / 2 * ss * random.uniform(0.9, 1.1)
+        draw.ellipse((cx - rx, y - ry, cx + rx, y + ry), fill=255)
+        if kind == "comma":                                       # tapering tail, down and to the left
+            end = (cx - random.uniform(0.2, 0.9) * d * ss, y + tail * ss)
+            ctrl = (cx + random.uniform(0.0, 0.3) * d * ss, y + tail * 0.5 * ss)
+            pts = _bezier((cx, y), end, ctrl, 10)
+            for k, (px, py) in enumerate(pts):
+                r = d / 2 * ss * (0.85 - 0.55 * k / (len(pts) - 1))
+                draw.ellipse((px - r, py - r, px + r, py + r), fill=255)
+    return np.array(img.resize((W, H), Image.LANCZOS)), int(round(top))
 
 
 def _wobbly(p0, p1, amp: float, step: float):
@@ -442,58 +683,68 @@ def _vertical_extent(font_path: str, fs: int) -> tuple:
     """(top, bottom) of the ink of tall and descending letters of this font, relative to the baseline
     (top < 0). Used instead of font.getmetrics(): script fonts often reserve 40-90% more height than
     their letters need, which made the text tiny inside the 64 px line (letters looked small & narrow)."""
-    font = _load_font(font_path, fs)
     cs = font_charset(font_path)
     top, bottom = 0, 0
     for ch in "bdfhklpqgjyBDFHKLĀŠŽ":
         if ch in cs:
-            g = _glyph_mask(font, ch, fs)
+            g = _glyph(font_path, fs, ch)
             if g is not None:
                 top = min(top, g[2])
                 bottom = max(bottom, g[2] + g[0].shape[0])
     if bottom - top < fs * 0.5:                       # font without those letters: fall back to metrics
-        a, d = font.getmetrics()
+        a, d = _load_font(font_path, fs).getmetrics()
         return -a, d
     return top, bottom
 
 
-def _render_handwritten(text: str, font: ImageFont.FreeTypeFont, fs: int, ink: int,
-                        pad_x: int, pad_y: int, join: bool, extent: tuple, struck: list | None = None,
-                        roman: list | None = None) -> Image.Image:
-    ref_top, ref_bottom = extent
-    stem = _stem_width(font, fs)
-    items, links = [], []          # coordinates: x from the left, y relative to the baseline
+def _layout(text: str, font_path: str, fs: int, join: bool, roman: list | None = None):
+    """Place the letters of `text` like a hand would. Returns (items, links, stem, xh).
+    items: dicts with X / right (x from the left), top (relative to the baseline), mask, wi (word index),
+    ci (character index inside the word). links: [(points, width)] - joining strokes between letters."""
+    stem = _stem_width(font_path, fs)
+    xh = _x_height(font_path, fs)
+    items, links = [], []
     x, prev, prev_ch = 0.0, None, ""
     size_state = dy_state = 0.0    # slowly drifting 'hand state' shared by neighbouring letters
     word_gap = random.uniform(*WORD_GAP_RANGE)
-    widx, in_word = 0, False        # index of the current word (for crossing out)
+    widx, ci, in_word = 0, 0, False
     for ch in text:
         if ch == " ":
             if in_word:
                 widx, in_word = widx + 1, False
+            ci = 0
             x = (prev["right"] if prev else x) + fs * random.uniform(0.2, 0.6)
             prev = None
             size_state *= 0.5
             word_gap = random.uniform(*WORD_GAP_RANGE)      # every word has its own spacing style
             continue
-        g = _glyph_mask(font, ch, fs)
+        in_word = True                                       # also for undrawable chars: keeps word indices in sync
+        g = _glyph(font_path, fs, ch)
         if g is None:
-            x += fs * 0.3
+            x = (prev["right"] if prev else x) + fs * 0.3
             prev = None
+            ci += 1
             continue
         if ch == "I" and roman and widx < len(roman) and roman[widx]:       # I inside a roman numeral
-            style = random.choices(list(ROMAN_I_STYLES), weights=list(ROMAN_I_STYLES.values()))[0]
+            style = _pick(ROMAN_I_STYLES)
             if style != "font":
                 mask_i, top_i = _roman_i(g, stem, style)
                 g = (mask_i, g[1], top_i)
         mask, _, top = g
-        in_word = True
         is_punct = not ch.isalnum()
+        if ch in PEN_PUNCT:
+            mask, top = _pen_punct(ch, stem, fs, xh)
+        elif ch in SMALL_PUNCT:
+            mask, top = _boost_small(mask, top, stem, fs)
 
-        if is_punct:       # punctuation: written carelessly - big scatter in size, height and tilt
-            J = PUNCT_JITTER
-            scale = float(np.clip(1 + random.gauss(0, J["scale"]), 0.55, 1.7))
-            dy = dy_state * fs + random.gauss(0, J["dy"] * fs)
+        if is_punct:       # punctuation: written carelessly - looser than letters (more for ! ? ( ) -, less for dots)
+            small = ch in SMALL_PUNCT
+            J = SMALL_JITTER if small else PUNCT_JITTER
+            scale = float(np.clip(1 + random.gauss(0, J["scale"]), 0.8, 1.25 if small else 1.7))
+            dy_noise = random.gauss(0, J["dy"] * fs)
+            if small:
+                dy_noise = float(np.clip(dy_noise, -0.08 * fs, 0.08 * fs))     # a dot never flies away
+            dy = dy_state * fs + dy_noise
             rot = float(np.clip(random.gauss(0, J["rot"]), -40, 40))
             gap = random.uniform(*J["gap"]) * fs
         else:              # letters: neighbours keep similar size / height (smooth drift)
@@ -504,12 +755,14 @@ def _render_handwritten(text: str, font: ImageFont.FreeTypeFont, fs: int, ink: i
             dy = dy_state * fs
             rot = random.gauss(0, J["rot"])
             gap = max(0.02, word_gap + random.gauss(0, J["gap"])) * fs     # never glued together
-        mask, top = _transform(mask, top, scale, rot)
+        mask, top = _transform(mask, top, scale, rot, around_centre=ch in SMALL_PUNCT)
         top += int(round(dy))
         h, w = mask.shape
         lprof, rprof = _profiles(mask)
         cur = {"top": top, "h": h, "w": w, "mask": mask, "lprof": lprof, "rprof": rprof,
-               "exit": _edge_point(mask, top, "right"), "entry": _edge_point(mask, top, "left"), "scale": scale, "wi": widx}
+               "exit": _edge_point(mask, top, "right"), "entry": _edge_point(mask, top, "left"),
+               "scale": scale, "wi": widx, "ci": ci}
+        ci += 1
         if prev is None:
             cur["X"] = x
         else:       # distance also follows the size of the two neighbours
@@ -526,70 +779,127 @@ def _render_handwritten(text: str, font: ImageFont.FreeTypeFont, fs: int, ink: i
                 links.append((_bezier(p0, p1, ctrl), width))
         items.append(cur)
         prev, prev_ch = cur, ch
+    return items, links, stem, xh
+
+
+def _place_correction(fix: str, font_path: str, fs: int, join: bool, x0: float, x1: float,
+                      top: float, xh: float, min_x: float):
+    """Lay out the correction `fix` smaller and put it above a struck span x0..x1 whose highest ink
+    (letters + strike strokes) is at `top`. Returns (items, links, right edge) or None."""
+    fs_c = max(16, int(round(fs * random.uniform(*CORRECTION_SCALE))))
+    c_items, c_links, _, _ = _layout(fix, font_path, fs_c, join, [bool(_ROMAN_RE.match(fix))])
+    if not c_items:
+        return None
+    left = min(i["X"] for i in c_items)
+    cw = max(i["right"] for i in c_items) - left
+    if random.random() < 0.6:                                   # centred over the mistake ...
+        cx = (x0 + x1) / 2 - cw / 2 + random.gauss(0, 0.05 * fs)
+    else:                                                       # ... or starting where it starts
+        cx = x0 + random.uniform(-0.1, 0.25) * fs
+    cx = max(cx, min_x + 0.25 * fs)                             # don't run into the previous correction
+    dx = cx - left
+    # baseline of the correction: just above the struck word; descenders may touch it, like on paper
+    base = top - random.uniform(-0.1, 0.3) * xh
+    tilt = random.uniform(-0.04, 0.04)                          # the correction's own baseline slope
+    for it in c_items:
+        it["X"] += dx
+        it["right"] += dx
+        it["top"] += int(round(base + tilt * (it["X"] - cx)))
+        it["wi"] = -1
+    links = [([(px + dx, py + base + tilt * (px + dx - cx)) for px, py in pts], w) for pts, w in c_links]
+    return c_items, links, max(i["right"] for i in c_items)
+
+
+def _render_handwritten(text: str, font_path: str, fs: int, ink: int, pad_x: int, pad_y: int, join: bool,
+                        extent: tuple, struck: list | None = None, roman: list | None = None,
+                        fixes: list | None = None) -> Image.Image:
+    ref_top, ref_bottom = extent
+    items, strokes, stem, xh = _layout(text, font_path, fs, join, roman)
     if not items:
         return Image.new("L", (10, 10), 255)
 
+    words: dict = {}
+    for it in items:
+        words.setdefault(it["wi"], []).append(it)
+    corr_right = -1e9
+    for wi, kind in enumerate(struck or []):                 # cross out the chosen words
+        word = words.get(wi)
+        if not kind or not word:
+            continue
+        fix = fixes[wi] if fixes and wi < len(fixes) else None
+        part = word
+        if fix:                                              # only the mistake, not its punctuation
+            a, b = fix[1]
+            part = [i for i in word if a <= i["ci"] < b] or word
+        x0, x1 = min(i["X"] for i in part), max(i["right"] for i in part)
+        width = max(2, int(stem * random.uniform(*STRIKE_WIDTH[kind])))
+        y_word = (min(i["top"] for i in part), max(i["top"] + i["h"] for i in part))
+        paths = _strike_paths(kind, x0, x1, xh, fs, y_word, (ref_top, ref_bottom))
+        strokes += [(pts, width) for pts in paths]
+        if fix:                                              # write the right word above the mistake
+            strike_top = min(y for pts in paths for _, y in pts) - width / 2
+            placed = _place_correction(fix[0], font_path, fs, join, x0, x1,
+                                       min(y_word[0], strike_top), xh, corr_right)
+            if placed:
+                c_items, c_links, corr_right = placed
+                items += c_items
+                strokes += c_links
+
+    x_min = min(0.0, min(i["X"] for i in items))
     y_min = min(min(i["top"] for i in items), ref_top)
     y_max = max(max(i["top"] + i["h"] for i in items), ref_bottom)
-    W = int(max(i["right"] for i in items)) + 2 * pad_x
-    H = int(y_max - y_min) + 2 * pad_y
-    ox, oy = pad_x, pad_y - y_min       # canvas position of (x=0, baseline)
+    W = int(math.ceil(max(i["right"] for i in items) - x_min)) + 2 * pad_x
+    H = int(math.ceil(y_max - y_min)) + 2 * pad_y
+    ox, oy = pad_x - x_min, pad_y - y_min       # canvas position of (x=0, baseline)
 
     canvas = np.zeros((H, W), dtype=np.uint8)
     for it in items:
         m = it["mask"]
-        x0, y0 = int(ox + it["X"]), int(oy + it["top"])
+        x0, y0 = int(round(ox + it["X"])), int(round(oy + it["top"]))
+        if x0 < 0 or y0 < 0:
+            m = m[max(0, -y0):, max(0, -x0):]
+            x0, y0 = max(0, x0), max(0, y0)
         region = canvas[y0:y0 + m.shape[0], x0:x0 + m.shape[1]]
         np.maximum(region, m[:region.shape[0], :region.shape[1]], out=region)
     pen = Image.fromarray(canvas)
     draw = ImageDraw.Draw(pen)
-    for pts, width in links:
+    for pts, width in strokes:
         _dab_path(draw, pts, width, ox, oy)
-    if struck:                                           # cross out the chosen words
-        xh = _x_height(font, fs)
-        for wi, kind in enumerate(struck):
-            word = [i for i in items if i["wi"] == wi]
-            if not kind or not word:
-                continue
-            x0, x1 = min(i["X"] for i in word), max(i["right"] for i in word)
-            width = max(2, int(stem * random.uniform(*STRIKE_WIDTH[kind])))
-            y_word = (min(i["top"] for i in word), max(i["top"] + i["h"] for i in word))
-            for pts in _strike_paths(kind, x0, x1, xh, fs, y_word, (ref_top, ref_bottom)):
-                _dab_path(draw, pts, width, ox, oy)
     canvas = np.array(pen).astype(np.float32)
     return Image.fromarray((255 - canvas * (255 - ink) / 255).astype(np.uint8))
 
 
 def render_text_line(text: str, font_path: str | None = None, augment: bool = True,
                      hand: bool | None = None, connect: bool | None = None,
-                     struck: list | None = None, roman: list | None = None) -> Image.Image:
-    """Render `text` as a grayscale line image of height TARGET_HEIGHT."""
+                     struck: list | None = None, roman: list | None = None,
+                     fixes: list | None = None) -> Image.Image:
+    """Render `text` as a grayscale line image of height TARGET_HEIGHT.
+    struck: per word None / strike kind; fixes: per word None / (correction, (a, b)) - the correction is
+    written above characters a..b of that word (those characters are the ones crossed out)."""
     font_path = font_path or random.choice(_available_fonts())
     font_size = random.randint(56, 88)  # big on purpose; downscaled at the end
     font = _load_font(font_path, font_size)
     ref_top, ref_bottom = _vertical_extent(font_path, font_size)
 
-    dummy = ImageDraw.Draw(Image.new("L", (10, 10), color=255))
-    bbox = dummy.textbbox((0, 0), text, font=font, anchor="ls")   # relative to the baseline
-
     pad_x = int(font_size * random.uniform(0.15, 0.5))
     pad_y = int((ref_bottom - ref_top) * random.uniform(0.05, 0.14))
-    top = min(ref_top, bbox[1])
-    bottom = max(ref_bottom, bbox[3])
-    w = max(1, bbox[2] - bbox[0]) + 2 * pad_x
-    h = (bottom - top) + 2 * pad_y
 
     ink = random.randint(0, 75)
-    if struck and any(struck):
-        hand = True                                    # crossing out needs letter positions
+    if (struck and any(struck)) or (hand is None and any(c in SMALL_PUNCT for c in text)):
+        hand = True        # crossing out needs letter positions; lines with commas/dots must keep them visible
     if hand is None:
         hand = random.random() < HANDWRITTEN_PROB      # letter-by-letter, hand-like variation
     if connect is None:
         connect = random.random() < CONNECT_PROB       # ... with letters joined by strokes
     if hand and any(c.isalnum() for c in text):
-        img = _render_handwritten(text, font, font_size, ink, pad_x, pad_y, join=connect,
-                                  extent=(ref_top, ref_bottom), struck=struck, roman=roman)
+        img = _render_handwritten(text, font_path, font_size, ink, pad_x, pad_y, join=connect,
+                                  extent=(ref_top, ref_bottom), struck=struck, roman=roman, fixes=fixes)
     else:
+        bbox = ImageDraw.Draw(Image.new("L", (10, 10))).textbbox((0, 0), text, font=font, anchor="ls")
+        top = min(ref_top, bbox[1])
+        bottom = max(ref_bottom, bbox[3])
+        w = max(1, bbox[2] - bbox[0]) + 2 * pad_x
+        h = (bottom - top) + 2 * pad_y
         img = Image.new("L", (w, h), color=255)
         ImageDraw.Draw(img).text((pad_x - bbox[0], pad_y - top), text, font=font, fill=ink, anchor="ls")
 
@@ -597,28 +907,44 @@ def render_text_line(text: str, font_path: str | None = None, augment: bool = Tr
         img = _augment(img)
 
     w, h = img.size
-    new_w = max(1, int(w * (TARGET_HEIGHT / h)))
-    return img.resize((new_w, TARGET_HEIGHT), Image.BILINEAR)
+    new_w = max(1, int(round(w * (TARGET_HEIGHT / h))))
+    img = img.resize((new_w, TARGET_HEIGHT), Image.BILINEAR)
+
+    if augment:
+        img = _degrade(img)
+    return img
+
+
+# --------------------------------------------------------------------------- augmentation
+
+def _rng() -> np.random.Generator:
+    """numpy generator driven by `random`, so random.seed() controls everything."""
+    return np.random.default_rng(random.getrandbits(64))
 
 
 def _paper_background(w: int, h: int) -> np.ndarray:
-    """Grey-ish paper, optionally with notebook grid lines (like the real scans)."""
+    """Grey-ish paper: plain, notebook grid or ruled lines (like the real scans)."""
     level = random.randint(185, 255)
     bg = np.full((h, w), level, dtype=np.float32)
-
-    if random.random() < 0.55:  # grid paper
+    style = random.choices(["plain", "grid", "ruled"], weights=[0.3, 0.5, 0.2])[0]
+    thick = max(1, int(round(h / 70)))
+    dark = random.randint(15, 55)
+    if style == "grid":
         cell = max(8, int(h * random.uniform(0.18, 0.4)))
-        thick = max(1, int(round(h / 70)))
-        dark = random.randint(15, 55)
         ox, oy = random.randint(0, cell - 1), random.randint(0, cell - 1)
         for x in range(ox, w, cell):
             bg[:, x:x + thick] -= dark
         for y in range(oy, h, cell):
             bg[y:y + thick, :] -= dark
+    elif style == "ruled":
+        step = max(10, int(h * random.uniform(0.45, 0.9)))
+        for y in range(random.randint(0, step - 1), h, step):
+            bg[y:y + thick, :] -= dark
     return np.clip(bg, 0, 255)
 
 
 def _augment(img: Image.Image) -> Image.Image:
+    """High-resolution part: ink thickness, slant, wavy baseline, paper and light."""
     # thicker ink (MinFilter grows dark strokes on a light background)
     if random.random() < 0.3:
         img = img.filter(ImageFilter.MinFilter(3))
@@ -634,49 +960,51 @@ def _augment(img: Image.Image) -> Image.Image:
         fillcolor=255,
     )
 
-    # wavy baseline: shift every column up/down by a slow sine wave
+    # wavy baseline: shift every column up/down by a slow sine wave (vectorised)
     w, h = img.size
     amp = int(random.uniform(0, 0.05) * h)
     if amp > 0:
         img = ImageOps.expand(img, border=(0, amp, 0, amp), fill=255)
         arr = np.array(img)
+        H, W = arr.shape
         wavelength = random.uniform(300, 1200)
         phase = random.uniform(0, 2 * np.pi)
-        shifts = np.round(amp * np.sin(2 * np.pi * np.arange(arr.shape[1]) / wavelength + phase)).astype(int)
-        for x in range(arr.shape[1]):
-            arr[:, x] = np.roll(arr[:, x], shifts[x])
-        img = Image.fromarray(arr)
+        shifts = np.round(amp * np.sin(2 * np.pi * np.arange(W) / wavelength + phase)).astype(int)
+        rows = (np.arange(H)[:, None] - shifts[None, :]) % H
+        img = Image.fromarray(arr[rows, np.arange(W)[None, :]])
 
     # paper + uneven lighting, ink stays darker than paper
     w, h = img.size
     text = np.array(img).astype(np.float32)
-    paper = _paper_background(w, h)
-    out = np.minimum(text, paper)
+    out = np.minimum(text, _paper_background(w, h))
     light = np.linspace(random.uniform(0.75, 1.0), random.uniform(0.75, 1.0), w, dtype=np.float32)
     out = out * light[None, :]
-    img = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
 
-    if random.random() < 0.6:
-        img = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.3, 1.2)))
 
+def _degrade(img: Image.Image) -> Image.Image:
+    """Final-resolution part (64 px): blur, sensor noise, JPEG artefacts - what the camera does."""
+    if random.random() < 0.5:
+        img = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.2, 0.8)))
     if random.random() < 0.6:
         arr = np.array(img).astype(np.float32)
-        arr += np.random.normal(0, random.uniform(2, 12), arr.shape)
+        arr += _rng().normal(0, random.uniform(2, 10), arr.shape)
         img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-
+    if random.random() < 0.3:
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=random.randint(35, 85))
+        buf.seek(0)
+        img = Image.open(buf).convert("L")
     return img
 
 
 def generate_batch(n: int, words: list[str] | None = None) -> list[tuple[Image.Image, str]]:
     words = words or load_words()
-    samples = []
-    for _ in range(n):
-        samples.append(make_sample(words))
-    return samples
+    return [make_sample(words) for _ in range(n)]
 
 
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)
-    for i, (img, text) in enumerate(generate_batch(30000)):
+    for i, (img, text) in enumerate(generate_batch(50)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")
