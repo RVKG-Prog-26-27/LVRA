@@ -16,6 +16,7 @@ import glob
 import math
 import os
 import random
+import re
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
@@ -76,6 +77,63 @@ def font_charset(font_path: str) -> frozenset:
     return frozenset(ok)
 
 
+# --------------------------------------------------------------------------- roman numerals
+
+ROMAN_PROB = 0.006        # share of tokens that are roman numerals (I, II, XIV., (XX), iv, MCMXCIV ...)
+# How the letter I of a roman numeral is drawn: the font's own glyph / a plain stick / a stick with
+# small bars on top and bottom (serifs). People write roman numerals in all these ways.
+ROMAN_I_STYLES = {"font": 0.4, "stick": 0.35, "serif": 0.25}
+
+_ROMAN_PART = r"(?:[IVXLCDM]+|[ivxlcdm]+)"
+_ROMAN_RE = re.compile(r"^[\(\[]?" + _ROMAN_PART + r"(?:-" + _ROMAN_PART + r")?[.,;:\)\]]*$")
+
+
+def _to_roman(n: int, additive: bool = False) -> str:
+    """1..3999 -> roman numeral. additive=True gives the 'clock' forms IIII, VIIII, XXXX, LXXXX ..."""
+    table = ([(1000, "M"), (500, "D"), (100, "C"), (50, "L"), (10, "X"), (5, "V"), (1, "I")] if additive else
+             [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+              (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")])
+    out = ""
+    for value, sym in table:
+        while n >= value:
+            out += sym
+            n -= value
+    return out
+
+
+def _roman_token() -> str:
+    """A random roman numeral as people really write it: small numbers most often, sometimes big ones,
+    sometimes lowercase, with a dot / bracket, or a range like XIV-XVI."""
+    lo, hi = random.choices([(1, 20), (21, 100), (101, 1000), (1001, 3999)], weights=[0.55, 0.25, 0.15, 0.05])[0]
+    n = random.randint(lo, hi)
+    add = random.random() < 0.08
+    r = _to_roman(n, add)
+    if random.random() < 0.15:
+        r = r.lower()
+    form = random.choices(["{}", "{}.", "{})", "({})", "range"], weights=[0.55, 0.2, 0.1, 0.1, 0.05])[0]
+    if form == "range":
+        return r + "-" + _to_roman(min(3999, n + random.randint(1, 10)), add)
+    return form.format(r)
+
+
+def _roman_i(g, stem: int, style: str):
+    """The letter I of a roman numeral drawn by us: a plain stick or a stick with top/bottom bars."""
+    mask, _, top = g
+    h = max(mask.shape[0], 8)
+    sw = max(2, int(stem * random.uniform(0.9, 1.3)))
+    ww = sw + 4 if style == "stick" else int(h * random.uniform(0.4, 0.6)) + sw
+    img = Image.new("L", (ww, h), 0)
+    d = ImageDraw.Draw(img)
+    r, cx, lean = sw / 2, ww / 2, random.uniform(-0.06, 0.06) * h
+    _dab_path(d, _wobbly((cx + lean, r), (cx - lean, h - r - 1), 0.01 * h, 0.3 * h), sw, 0, 0)
+    if style == "serif":
+        half = (ww - sw) / 2
+        for y in (r, h - r - 1):
+            tilt = random.uniform(-0.04, 0.04) * h
+            _dab_path(d, _wobbly((cx - half, y - tilt), (cx + half, y + tilt), 0.01 * h, 0.3 * h), max(2, int(sw * 0.8)), 0, 0)
+    return np.array(img), top
+
+
 # --------------------------------------------------------------------------- texts
 
 def _default_corpus() -> list[str]:
@@ -127,7 +185,13 @@ def random_tokens(words: list[str], max_chars: int = 60, allowed=None) -> list[s
     guard = 0
     while length < target and guard < 200:
         guard += 1
-        w = _random_number() if random.random() < 0.07 else random.choice(words)
+        r = random.random()
+        if r < 0.07:
+            w = _random_number()
+        elif r < 0.07 + ROMAN_PROB:
+            w = _roman_token()
+        else:
+            w = random.choice(words)
         if allowed is not None and not set(w) <= allowed:
             continue
         extra = len(w) + (1 if parts else 0)
@@ -170,7 +234,8 @@ def make_sample(words: list[str], max_chars: int = 60, augment: bool = True) -> 
         label = " ".join(STRIKE_MARK if kd else tok for tok, kd in zip(tokens, kinds))
     else:
         label = " ".join(tok for tok, kd in zip(tokens, kinds) if not kd)
-    img = render_text_line(text, font_path=font_path, augment=augment, struck=word_kinds)
+    word_roman = [bool(_ROMAN_RE.match(tok)) for tok in tokens for _ in tok.split()]
+    img = render_text_line(text, font_path=font_path, augment=augment, struck=word_kinds, roman=word_roman)
     return img, label
 
 
@@ -194,13 +259,13 @@ STRIKE_LINE_PROB = 0.2    # share of lines that contain at least one crossed-out
 STRIKE_MODE = "mark"      # "mark": label gets STRIKE_MARK (¤) in place of the word; "skip": word is left out
 STRIKE_WEIGHTS = {"line": 0.35,       # one line through the word
                   "scribble": 0.25,   # word smeared over with dense zigzag / coil strokes
-                  "cross": 0.20,      # crosses (X), several for a long word
+                  "cross": 0.20,      # one cross (X) fitted to the word
                   "multi": 0.20}      # several roughly parallel lines
 
 # scatter strengths. scale/dy are relative (dy in font sizes), rot in degrees
 LETTER_JITTER = {"scale": 0.07, "dy": 0.03, "rot": 4.0, "gap": 0.03}
 PUNCT_JITTER = {"scale": 0.25, "dy": 0.12, "rot": 20.0, "gap": (-0.05, 0.28)}
-WORD_GAP_RANGE = (0.03, 0.15)      # base distance between letters of a word (in font sizes), per word
+WORD_GAP_RANGE = (0.05, 0.15)      # base distance between letters of a word (in font sizes), per word
 
 
 @functools.lru_cache(maxsize=512)
@@ -324,7 +389,8 @@ def _dab_path(draw: ImageDraw.ImageDraw, pts, width: float, ox: float, oy: float
 STRIKE_WIDTH = {"line": (0.8, 1.3), "cross": (0.7, 1.1), "multi": (0.55, 0.9), "scribble": (0.5, 0.8)}  # x pen stem
 
 
-def _strike_paths(kind: str, x0: float, x1: float, xh: float, fs: int) -> list:
+def _strike_paths(kind: str, x0: float, x1: float, xh: float, fs: int, y_word: tuple = (0, 0),
+                  y_limits: tuple = (-1e9, 1e9)) -> list:
     """Strokes that cross out one word spanning x0..x1 (coordinates: x from the left, y from the baseline)."""
     x0 -= fs * random.uniform(0.03, 0.12)
     x1 += fs * random.uniform(0.03, 0.12)
@@ -343,15 +409,18 @@ def _strike_paths(kind: str, x0: float, x1: float, xh: float, fs: int) -> list:
             y += random.gauss(0, 0.07 * xh)
             xa, xb = x0 + random.uniform(0, 0.06) * fs, x1 - random.uniform(0, 0.06) * fs
             paths.append(_wobbly((xa, y - slope), (xb, y + slope), amp, step))
-    elif kind == "cross":                       # X, several in a chain for a long word
-        n = int(np.clip(round(w / (1.1 * fs)), 1, 6))
-        cw = w / n
-        for i in range(n):
-            cx0 = x0 + i * cw
-            cx1 = cx0 + cw * random.uniform(0.92, 1.05)
-            j = lambda: random.uniform(-0.1, 0.1) * xh
-            paths.append(_wobbly((cx0, y_hi + j()), (cx1, y_lo + j()), amp, step))
-            paths.append(_wobbly((cx0, y_lo + j()), (cx1, y_hi + j()), amp, step))
+    elif kind == "cross":                       # ONE X that adapts to the word: as wide as the word, as tall as its letters
+        top = max(y_word[0], -xh * 1.9) - random.uniform(0, 0.1) * xh
+        bot = min(y_word[1], xh * 0.65) + random.uniform(0, 0.1) * xh
+        need = min(0.3 * w, 2.4 * xh)               # a long word still gets a real X, not two flat lines
+        if bot - top < need:
+            mid = (top + bot) / 2
+            top, bot = mid - need / 2, mid + need / 2
+        top, bot = max(top, y_limits[0] * 0.9), min(bot, y_limits[1] * 0.9)     # stay inside the line image
+        jx = lambda: random.uniform(-0.04, 0.04) * w
+        jy = lambda: random.uniform(-0.08, 0.08) * (bot - top)
+        paths.append(_wobbly((x0 + jx(), top + jy()), (x1 + jx(), bot + jy()), amp, step))
+        paths.append(_wobbly((x0 + jx(), bot + jy()), (x1 + jx(), top + jy()), amp, step))
     else:                                       # "scribble": the word is smeared over
         if random.random() < 0.5:               # dense zigzag while moving right
             n = max(4, int(w / (random.uniform(0.07, 0.13) * fs)))
@@ -389,7 +458,8 @@ def _vertical_extent(font_path: str, fs: int) -> tuple:
 
 
 def _render_handwritten(text: str, font: ImageFont.FreeTypeFont, fs: int, ink: int,
-                        pad_x: int, pad_y: int, join: bool, extent: tuple, struck: list | None = None) -> Image.Image:
+                        pad_x: int, pad_y: int, join: bool, extent: tuple, struck: list | None = None,
+                        roman: list | None = None) -> Image.Image:
     ref_top, ref_bottom = extent
     stem = _stem_width(font, fs)
     items, links = [], []          # coordinates: x from the left, y relative to the baseline
@@ -411,6 +481,11 @@ def _render_handwritten(text: str, font: ImageFont.FreeTypeFont, fs: int, ink: i
             x += fs * 0.3
             prev = None
             continue
+        if ch == "I" and roman and widx < len(roman) and roman[widx]:       # I inside a roman numeral
+            style = random.choices(list(ROMAN_I_STYLES), weights=list(ROMAN_I_STYLES.values()))[0]
+            if style != "font":
+                mask_i, top_i = _roman_i(g, stem, style)
+                g = (mask_i, g[1], top_i)
         mask, _, top = g
         in_word = True
         is_punct = not ch.isalnum()
@@ -478,7 +553,8 @@ def _render_handwritten(text: str, font: ImageFont.FreeTypeFont, fs: int, ink: i
                 continue
             x0, x1 = min(i["X"] for i in word), max(i["right"] for i in word)
             width = max(2, int(stem * random.uniform(*STRIKE_WIDTH[kind])))
-            for pts in _strike_paths(kind, x0, x1, xh, fs):
+            y_word = (min(i["top"] for i in word), max(i["top"] + i["h"] for i in word))
+            for pts in _strike_paths(kind, x0, x1, xh, fs, y_word, (ref_top, ref_bottom)):
                 _dab_path(draw, pts, width, ox, oy)
     canvas = np.array(pen).astype(np.float32)
     return Image.fromarray((255 - canvas * (255 - ink) / 255).astype(np.uint8))
@@ -486,7 +562,7 @@ def _render_handwritten(text: str, font: ImageFont.FreeTypeFont, fs: int, ink: i
 
 def render_text_line(text: str, font_path: str | None = None, augment: bool = True,
                      hand: bool | None = None, connect: bool | None = None,
-                     struck: list | None = None) -> Image.Image:
+                     struck: list | None = None, roman: list | None = None) -> Image.Image:
     """Render `text` as a grayscale line image of height TARGET_HEIGHT."""
     font_path = font_path or random.choice(_available_fonts())
     font_size = random.randint(56, 88)  # big on purpose; downscaled at the end
@@ -512,7 +588,7 @@ def render_text_line(text: str, font_path: str | None = None, augment: bool = Tr
         connect = random.random() < CONNECT_PROB       # ... with letters joined by strokes
     if hand and any(c.isalnum() for c in text):
         img = _render_handwritten(text, font, font_size, ink, pad_x, pad_y, join=connect,
-                                  extent=(ref_top, ref_bottom), struck=struck)
+                                  extent=(ref_top, ref_bottom), struck=struck, roman=roman)
     else:
         img = Image.new("L", (w, h), color=255)
         ImageDraw.Draw(img).text((pad_x - bbox[0], pad_y - top), text, font=font, fill=ink, anchor="ls")
@@ -601,6 +677,6 @@ def generate_batch(n: int, words: list[str] | None = None) -> list[tuple[Image.I
 
 if __name__ == "__main__":
     os.makedirs("samples", exist_ok=True)
-    for i, (img, text) in enumerate(generate_batch(20)):
+    for i, (img, text) in enumerate(generate_batch(30000)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")
