@@ -1,5 +1,5 @@
 # LVRA — Latviešu valodas rokraksta atpazīšana
-
+https://claude.ai/share/86c318aa-8729-4f6b-ad03-bbc1a92922c9
 **LVRA** ir eksperimentāla sistēma, kas no rokrakstā rakstīta latviešu teksta attēla iegūst rediģējamu digitālu tekstu. Projektu veido divas daļas:
 
 | Daļa | Mape | Tehnoloģijas | Uzdevums |
