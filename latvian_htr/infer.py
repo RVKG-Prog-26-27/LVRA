@@ -11,7 +11,7 @@ from PIL import Image
 
 from alphabet import NUM_CLASSES, decode_beam_search
 from dataset import image_to_tensor
-from model import CRNN
+from model import CRNN, load_model
 from synthetic_data import TARGET_HEIGHT
 
 
@@ -53,9 +53,8 @@ if __name__ == "__main__":
     # Izvēlamies videokarti, ja tā ir pieejama, pretējā gadījumā procesoru.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Izveidojam tukšu tīklu izvēlētajai ierīcei...
-    model = CRNN(num_classes=NUM_CLASSES).to(device)
-    # ...un ielādējam tajā saglabātos svarus. map_location norāda, kur tos ievietot.
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    # load_model sapratīs gan veco, gan jauno kontrolpunkta formātu (un x_stride).
+    model = load_model(args.checkpoint, NUM_CLASSES, device)
 
     image_tensor = load_image(args.image)
     text = predict(model, image_tensor, device, beam_width=args.beam_width)
