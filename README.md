@@ -282,9 +282,7 @@ pip install pillow
 python verify_labels.py
 ```
 
-Tkinter ir Python standarta komplektā (Windows). Attēlu mape un `labels.csv` ceļš ir norādīti faila sākumā (`FOLDER`, `CSV_PATH`); uz cita datora tie jāpielāgo. Pēc noklusējuma: `C:\Users\r0mka\Desktop\LVRA\latvian_htr\data\real_dataset\images`.
-
-> **Uzmanību:** rīks lasa `labels.csv` no **attēlu mapes** (`images/`), bet šajā README (un apmācības kodā) `labels.csv` atrodas mapē `data/real_dataset/` blakus `images/`. Ja pārbaudi veicat `images/labels.csv`, pēc tam fails jāsinhronizē ar `data/real_dataset/labels.csv` vai jānomaina `CSV_PATH` rīka kodā.
+Tkinter ir Python standarta komplektā (Windows). Attēlu mape un `labels.csv` rīks lasa `labels.csv` no **attēlu mapes** (`images/`), bet šajā README (un apmācības kodā) `labels.csv` atrodas mapē `data/real_dataset/` blakus `images/`. Pēc noklusējuma: `C:\Users\r0mka\Desktop\LVRA\latvian_htr\data\real_dataset\images`.
 
 **Taustiņi un darbības**
 
@@ -293,7 +291,7 @@ Tkinter ir Python standarta komplektā (Windows). Attēlu mape un `labels.csv` c
 | Saglabāt labojumu un pāriet uz nākamo rindu | `Enter` |
 | Iepriekšējā / nākamā rinda bez labojuma | `Alt+←` / `Alt+→` (vai `Ctrl+←` / `Ctrl+→`) |
 | 10 rindas atpakaļ / uz priekšu | `PageUp` / `PageDown` |
-| Pāriet uz numuru vai faila nosaukumu (piem., `0215`) | `Ctrl+G` |
+| Pāriet uz numuru vai faila nosaukumu (piem., `0215`) | `Ctrl+F` |
 | Saglabāt `labels.csv` nekavējoties | `Ctrl+S` |
 | Atcelt labojumus pašreizējā rindā (atgriezt sākotnējo tekstu) | `Ctrl+Z` |
 | Apgriezt attēlu pēc iezīmētās zonas | `Ctrl+R` vai poga «Apgriezt» |
