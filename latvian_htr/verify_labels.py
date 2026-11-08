@@ -7,10 +7,10 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent                 # папка latvian_htr/
+BASE = Path(__file__).resolve().parent                 
 FOLDER = BASE / "data" / "real_dataset" / "images"  
 FOLDER_CSV = BASE / "data" / "real_dataset"
-CSV_PATH = FOLDER_CSV / "labels.csv"                        # как у тебя сейчас
+CSV_PATH = FOLDER_CSV / "labels.csv"                        
 
 PROGRESS_PATH = os.path.join(FOLDER, ".verify_progress")
 ORIG_DIR = os.path.join(FOLDER, "_originals")
