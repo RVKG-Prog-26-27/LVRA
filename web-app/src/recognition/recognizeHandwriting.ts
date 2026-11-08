@@ -6,25 +6,15 @@ import type { HandwritingRecognitionService, LineImage, RecognitionResult } from
 
 export interface RecognizeHandwritingOptions {
   timeoutMs: number;
-<<<<<<< HEAD
   trainingConsent: boolean;
   /** Aborted when the user presses "Atcelt". */
-=======
-  /** Aborted when the user presses "Atcelt" */
->>>>>>> origin/web-app
   signal?: AbortSignal;
 }
 
 /**
-<<<<<<< HEAD
  * The single entry point the UI uses: line images in, recognised text out.
  * Builds labels.csv, adds the timeout and cancellation on top of whichever
  * service is active, and turns the returned CSV into text for the editor.
-=======
- * The single entry point the UI uses: image in, recognised text out
- * Adds the timeout and cancellation on top of whichever service is active,
- * so every backend gets identical behaviour
->>>>>>> origin/web-app
  */
 export async function recognizeHandwriting(
   service: HandwritingRecognitionService,

@@ -1,12 +1,6 @@
 /**
-<<<<<<< HEAD
  * Settings changed from the developer panel (open the app with ?dev=1).
  * Development only: normal users always get config.recognition.defaultBackend.
-=======
- * TEMPORARY
- * Settings for the mock recognition service, changed from the developer
- * panel (open the app with ?dev=1). Delete together with the mock
->>>>>>> origin/web-app
  */
 import { config } from '../config/config';
 
@@ -25,9 +19,9 @@ export interface MockSettings {
   /** Which recognition backend is used: the real AI server or the mock. */
   backend: Backend;
   scenario: MockScenario;
-  /** Simulated processing time */
+  /** Simulated processing time. */
   delayMs: number;
-  /** When set, overrides the normal 60 s timeout so the timeout error can be tested quickly */
+  /** When set, overrides the normal 60 s timeout so the timeout error can be tested quickly. */
   timeoutOverrideMs: number | null;
 }
 

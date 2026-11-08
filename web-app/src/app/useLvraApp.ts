@@ -1,4 +1,3 @@
-// does all the work to get to the screen that appState.ts decides
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import { config } from '../config/config';
 import { loadImageFile, prepareLineImages, type LoadedImage } from '../image/imageProcessing';
@@ -20,7 +19,7 @@ export function useLvraApp(trainingConsent: boolean) {
   const imageRef = useRef<LoadedImage | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  /** Deletes the image from memory - when recognition is done or the  */
+  /** Deletes the image from memory. Called after recognition and whenever the user starts over. */
   const releaseImage = useCallback(() => {
     imageRef.current?.release();
     imageRef.current = null;
@@ -71,7 +70,7 @@ export function useLvraApp(trainingConsent: boolean) {
         signal: controller.signal,
       });
 
-      // Recognition succeeded: delete the image
+      // Recognition succeeded: delete the image right away, keep only the text.
       releaseImage();
       const words = config.highlightUncertainWords ? result.words : [];
       dispatch({

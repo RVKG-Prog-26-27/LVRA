@@ -3,16 +3,12 @@ import { mockSettings } from './mockSettings';
 import { ServerRecognitionService } from './serverRecognitionService';
 import type { HandwritingRecognitionService } from './types';
 
-<<<<<<< HEAD
 /**
  * The one place that decides which recognition backend the app uses.
  * Normally the real AI server (config.recognition.defaultBackend). The
  * developer panel can switch to the mock at any time, so the choice is read
  * on every call.
  */
-=======
-// decides which recognition module the app uses
->>>>>>> origin/web-app
 export function createRecognitionService(): HandwritingRecognitionService {
   const server = new ServerRecognitionService();
   const mock = new MockRecognitionService();

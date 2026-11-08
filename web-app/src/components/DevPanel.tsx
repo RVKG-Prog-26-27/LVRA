@@ -1,5 +1,4 @@
 /**
-<<<<<<< HEAD
  * Developer panel, visible only when the address contains ?dev=1.
  * Intentionally in English: it is a developer tool, not part of the
  * user-facing app.
@@ -8,12 +7,6 @@
  * - Mock scenarios, simulated delay, short timeout.
  * - The last request: every line PNG the browser cut out, the labels.csv
  *   that was sent and the labels.csv that came back.
-=======
- * TEMPORARY developer panel for testing with the mock service
- * Visible only when the address contains ?dev=1 :
- * it is a developer tool, not part of the user-facing app.
- * Remove together with the mock once the real model is connected.
->>>>>>> origin/web-app
  */
 import { useState, useSyncExternalStore } from 'react';
 import { devInspector } from '../recognition/devInspector';

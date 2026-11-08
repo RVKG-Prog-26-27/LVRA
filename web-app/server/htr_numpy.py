@@ -6,18 +6,21 @@ network itself is small, so its forward pass is rewritten here layer by
 layer with numpy. It reads the same checkpoint files (.pt) that
 latvian_htr/train.py saves and gives the same output as latvian_htr/infer.py.
 
-Nothing in latvian_htr is changed. This file only reads:
-  latvian_htr/alphabet.py        the character table and CTC decoding
-  latvian_htr/checkpoints/*.pt   the trained weights
+Nothing in latvian_htr is changed. The server only reads the trained
+weights (latvian_htr/checkpoints_v2/*.pt). The character table is in
+alphabet_table.py, a copy without PyTorch.
 
-IMPORTANT: the layers below must match latvian_htr/model.py. If the AI side
-changes the network (layer sizes, number of layers, order), this file has to
-be updated too, otherwise loading the checkpoint fails with a clear error.
+KEEP IN SYNC with latvian_htr:
+  model.py          the layers in forward() below, including the pooling sizes
+                    (they are not stored in the checkpoint)
+  synthetic_data.py TARGET_HEIGHT
+  dataset.py / infer.py  how a line image is prepared (prepare_line below)
+  alphabet.py       alphabet_table.py
+If model.py changes, loading the checkpoint fails with a clear message in
+the error log instead of returning wrong text.
 """
 
 import collections
-import importlib.util
-import os
 import pickle
 import threading
 import zipfile
@@ -25,7 +28,10 @@ import zipfile
 import numpy as np
 from PIL import Image, ImageOps
 
-TARGET_HEIGHT = 32  # same as latvian_htr/synthetic_data.py
+from alphabet_table import NUM_CLASSES, decode_beam_search
+
+TARGET_HEIGHT = 64  # same as latvian_htr/synthetic_data.py
+BEAM_WIDTH = 5  # same default as latvian_htr/infer.py
 
 _DTYPES = {
     "FloatStorage": np.float32,
@@ -41,15 +47,6 @@ _DTYPES = {
 
 
 # ---------------------------------------------------------------- loading
-
-def load_alphabet(htr_dir):
-    """Imports latvian_htr/alphabet.py by file path (it has no dependencies)."""
-    path = os.path.join(htr_dir, "alphabet.py")
-    spec = importlib.util.spec_from_file_location("lvra_alphabet", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
 
 def _rebuild_tensor(storage, offset, size, stride, *_):
     if len(size) == 0:
@@ -147,16 +144,41 @@ def _lstm_direction(x, w_ih, w_hh, b_ih, b_hh, reverse):
     return out
 
 
+def check_architecture(sd):
+    """Fails with a clear message if the checkpoint does not fit the layers below."""
+    expected = {
+        "cnn.net.0.weight": (64, 1, 3, 3),
+        "cnn.net.3.weight": (128, 64, 3, 3),
+        "cnn.net.6.weight": (256, 128, 3, 3),
+        "cnn.net.8.weight": (256, 256, 3, 3),
+        "cnn.net.11.weight": (512, 256, 3, 3),
+        "cnn.net.14.weight": (512, 512, 3, 3),
+        "cnn.net.18.weight": (512, 512, 4, 1),
+        "rnn.lstm.weight_ih_l0": (1024, 512),
+        "rnn.fc.weight": (NUM_CLASSES, 512),
+    }
+    for key, shape in expected.items():
+        if key not in sd or tuple(sd[key].shape) != shape:
+            found = tuple(sd[key].shape) if key in sd else "missing"
+            raise RuntimeError(
+                f"Checkpoint does not match the server's copy of the model: {key} is {found}, expected {shape}. "
+                "Update server/htr_numpy.py (and alphabet_table.py) to match latvian_htr."
+            )
+
+
 def forward(sd, image):
     """
-    image: float32 [32, W], ink close to 1, paper close to 0 (as in
-    latvian_htr/dataset.py image_to_tensor). Returns logits [T, num_classes].
-    Layer numbers are the indexes inside CNNBackbone.net in latvian_htr/model.py.
+    image: float32 [64, W], ink close to 1, paper close to 0 (as in
+    latvian_htr/dataset.py image_to_tensor). Returns log probabilities [T, num_classes].
+    Layer numbers are the indexes inside CNNBackbone.net in latvian_htr/model.py:
+      0 conv 3x3, 2 maxpool 2x2, 3 conv, 5 maxpool (2,1), 6 conv, 8 conv, 10 maxpool (2,1),
+      11 conv + 12 batchnorm, 14 conv + 15 batchnorm, 17 maxpool (2,1), 18 conv (4,1) no padding.
+    Height 64 -> 32 -> 16 -> 8 -> 4 -> 1, width W -> W/2.
     """
     p = "cnn.net."
     x = image[None].astype(np.float32)
     x = _maxpool(_relu(_conv2d(x, sd[p + "0.weight"], sd[p + "0.bias"], 1)), 2, 2)
-    x = _maxpool(_relu(_conv2d(x, sd[p + "3.weight"], sd[p + "3.bias"], 1)), 2, 2)
+    x = _maxpool(_relu(_conv2d(x, sd[p + "3.weight"], sd[p + "3.bias"], 1)), 2, 1)
     x = _relu(_conv2d(x, sd[p + "6.weight"], sd[p + "6.bias"], 1))
     x = _maxpool(_relu(_conv2d(x, sd[p + "8.weight"], sd[p + "8.bias"], 1)), 2, 1)
     x = _relu(_batchnorm(_conv2d(x, sd[p + "11.weight"], sd[p + "11.bias"], 1), sd, p + "12."))
@@ -169,54 +191,40 @@ def forward(sd, image):
         k = f"rnn.lstm.%s_l{layer}_reverse"
         bwd = _lstm_direction(seq, sd[k % "weight_ih"], sd[k % "weight_hh"], sd[k % "bias_ih"], sd[k % "bias_hh"], True)
         seq = np.concatenate([fwd, bwd], axis=1)
-    return seq @ sd["rnn.fc.weight"].T + sd["rnn.fc.bias"]
+    logits = seq @ sd["rnn.fc.weight"].T + sd["rnn.fc.bias"]
+    shifted = logits - logits.max(axis=1, keepdims=True)
+    return shifted - np.log(np.exp(shifted).sum(axis=1, keepdims=True))  # log_softmax
 
 
 # ---------------------------------------------------------------- recogniser
 
 def prepare_line(img):
     """
-    Makes a line image from the browser look like the training images:
-    greyscale, full contrast, cropped to the writing with white margins of
-    about a quarter of the text height (synthetic_data.render_text_line uses
-    10 px around 30 to 50 px text), then scaled to 32 px height.
+    Same steps as latvian_htr/infer.py load_image + dataset.py image_to_tensor:
+    greyscale, scale to 64 px height, auto contrast, invert (ink = 1).
+    The browser already crops each line with margins like the training images.
     """
-    gray = ImageOps.autocontrast(img.convert("L"), cutoff=1)
-    arr = np.asarray(gray, dtype=np.uint8)
-    ink = arr < 140
-    if ink.any():
-        rows = np.where(ink.any(axis=1))[0]
-        cols = np.where(ink.any(axis=0))[0]
-        arr = arr[rows[0] : rows[-1] + 1, cols[0] : cols[-1] + 1]
-        pad = max(2, int(round(arr.shape[0] * 0.27)))
-        arr = np.pad(arr, pad, constant_values=255)
-    gray = Image.fromarray(arr)
+    gray = img.convert("L")
     w, h = gray.size
     new_w = max(1, int(w * (TARGET_HEIGHT / h)))
     gray = gray.resize((new_w, TARGET_HEIGHT), Image.BILINEAR)
+    gray = ImageOps.autocontrast(gray, cutoff=1)
     return 1.0 - np.asarray(gray, dtype=np.float32) / 255.0
 
 
 class Recognizer:
     """Loads the model once (on first use) and reads one line image at a time."""
 
-    def __init__(self, htr_dir, checkpoint_path):
-        self.htr_dir = htr_dir
+    def __init__(self, checkpoint_path):
         self.checkpoint_path = checkpoint_path
         self._weights = None
-        self._alphabet = None
         self._lock = threading.Lock()
 
     def _ensure_loaded(self):
         with self._lock:
             if self._weights is None:
-                self._alphabet = load_alphabet(self.htr_dir)
                 weights = load_state_dict(self.checkpoint_path)
-                classes = weights["rnn.fc.weight"].shape[0]
-                if classes != self._alphabet.NUM_CLASSES:
-                    raise RuntimeError(
-                        f"Checkpoint has {classes} classes, alphabet.py has {self._alphabet.NUM_CLASSES}"
-                    )
+                check_architecture(weights)
                 self._weights = weights
 
     @property
@@ -225,5 +233,5 @@ class Recognizer:
 
     def recognize(self, img):
         self._ensure_loaded()
-        logits = forward(self._weights, prepare_line(img))
-        return self._alphabet.decode_greedy(logits.argmax(axis=1).tolist()).strip()
+        log_probs = forward(self._weights, prepare_line(img))
+        return decode_beam_search(log_probs, beam_width=BEAM_WIDTH).strip()

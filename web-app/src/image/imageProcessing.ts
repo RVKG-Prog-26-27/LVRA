@@ -55,7 +55,7 @@ export async function loadImageFile(file: File | null | undefined): Promise<Load
   }
 }
 
-/** Draws the image - rotated and scaled to fit maxLong x maxShort onto the canvas */
+/** Draws the image rotated and scaled to fit maxLong x maxShort onto the given canvas. */
 export function drawRotated(
   canvas: HTMLCanvasElement,
   image: LoadedImage,
@@ -75,11 +75,7 @@ export function drawRotated(
   const drawWidth = swap ? target.height : target.width;
   const drawHeight = swap ? target.width : target.height;
 
-<<<<<<< HEAD
   ctx.fillStyle = '#ffffff'; // White paper behind transparent PNGs.
-=======
-  ctx.fillStyle = '#ffffff'; // draws background to PNG without one
->>>>>>> origin/web-app
   ctx.fillRect(0, 0, target.width, target.height);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -90,7 +86,6 @@ export function drawRotated(
   ctx.restore();
 }
 
-<<<<<<< HEAD
 /**
  * Rotates and scales the photo (max 1920 x 1080 in its orientation), then
  * splits it into line images 0001.png, 0002.png, ... (top line first).
@@ -101,27 +96,11 @@ export async function prepareLineImages(
   rotation: Rotation,
   options: { maxLongSide: number; maxShortSide: number; maxLines: number },
 ): Promise<LineImage[]> {
-=======
-/** Produces the PNG (max 1920 x 1080) that is sent for recognition. */
-export async function prepareImageForRecognition(
-  image: LoadedImage,
-  rotation: Rotation,
-  options: { maxLongSide: number; maxShortSide: number; pngQuality: number },
-): Promise<Blob> {
->>>>>>> origin/web-app
   const canvas = document.createElement('canvas');
   let blobs: Blob[];
   try {
     drawRotated(canvas, image, rotation, options.maxLongSide, options.maxShortSide);
-<<<<<<< HEAD
     blobs = await splitCanvasIntoLines(canvas);
-=======
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/png', options.pngQuality),
-    );
-    if (!blob || blob.size === 0) throw new AppError('IMAGE_PROCESSING_FAILED', 'Empty PNG');
-    return blob;
->>>>>>> origin/web-app
   } catch (error) {
     throw new AppError('IMAGE_PROCESSING_FAILED', error instanceof Error ? error.message : undefined);
   } finally {

@@ -26,7 +26,7 @@ Privacy (must match the privacy notice):
 
 Settings (environment variables, all optional):
   LVRA_HTR_DIR      folder of the AI code, default: ../../latvian_htr from this file
-  LVRA_CHECKPOINT   model weights, default: <LVRA_HTR_DIR>/checkpoints/crnn_step2000.pt
+  LVRA_CHECKPOINT   model weights, default: checkpoints_v2/crnn_step30000.pt in LVRA_HTR_DIR
   LVRA_DATA_DIR     where training data is kept, default: ~/lvra_data/real_dataset
                     (on PythonAnywhere: /home/cloudy1337/lvra_data/real_dataset)
 """
@@ -52,7 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_APP_DIR = os.path.dirname(HERE)
 DIST_DIR = os.path.join(WEB_APP_DIR, "dist")
 HTR_DIR = os.path.abspath(os.environ.get("LVRA_HTR_DIR", os.path.join(WEB_APP_DIR, "..", "latvian_htr")))
-CHECKPOINT = os.environ.get("LVRA_CHECKPOINT", os.path.join(HTR_DIR, "checkpoints", "crnn_step2000.pt"))
+CHECKPOINT = os.environ.get("LVRA_CHECKPOINT", os.path.join(HTR_DIR, "checkpoints_v2", "crnn_step30000.pt"))
 DATA_DIR = os.path.expanduser(os.environ.get("LVRA_DATA_DIR", "~/lvra_data/real_dataset"))
 
 MAX_LINES = 100  # same as config.lines.maxLines in the web app
@@ -72,7 +72,7 @@ app = Flask(__name__, static_folder=None)
 app.request_class = InMemoryRequest
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB per request
 
-recognizer = Recognizer(HTR_DIR, CHECKPOINT)
+recognizer = Recognizer(CHECKPOINT)
 
 
 def error(code, status):
@@ -108,7 +108,6 @@ def health():
         {
             "website_built": os.path.isfile(os.path.join(DIST_DIR, "index.html")),
             "checkpoint_found": os.path.isfile(CHECKPOINT),
-            "alphabet_found": os.path.isfile(os.path.join(HTR_DIR, "alphabet.py")),
             "model_loaded": recognizer.loaded,
         }
     )

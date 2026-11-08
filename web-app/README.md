@@ -4,7 +4,7 @@ A responsive web app (phone first) that turns a photo of handwritten Latvian tex
 
 The user interface is entirely in Latvian. This documentation is in English for developers.
 
-> **Version 0.2.** The web app and the AI run together on PythonAnywhere (EU). The AI is the CRNN model from `../latvian_htr`, run with numpy. It is still early: it reads its training phrases well but new handwriting mostly wrongly, so users see the notice "AI vēl mācās, tāpēc atpazītais teksts var būt neprecīzs."
+> **Version 0.2.** The web app and the AI run together on PythonAnywhere (EU). The AI is the CRNN model from `../latvian_htr` (`checkpoints_v2/crnn_step30000.pt`), run with numpy. It reads computer-drawn handwriting fonts almost perfectly but real handwriting mostly wrongly, so users see the notice "AI vēl mācās, tāpēc atpazītais teksts var būt neprecīzs."
 
 ## User flow
 
@@ -25,11 +25,25 @@ LVRA/
     src/                  the website (React + TypeScript)
     server/app.py         Flask server: serves the website and the AI endpoint
     server/htr_numpy.py   the CRNN model run with numpy (no PyTorch)
+    server/alphabet_table.py  copy of the character table and CTC decoding (no PyTorch)
     requirements.txt      Python packages for the server
     dist/                 the built website ("npm run build"), this is what the server serves
 ```
 
-The server reads two files from `latvian_htr` without changing them: `alphabet.py` (character table and CTC decoding) and `checkpoints/crnn_step2000.pt` (the trained weights).
+The server reads one file from `latvian_htr` without changing it: `checkpoints_v2/crnn_step30000.pt` (the trained weights). It does not import any code from `latvian_htr`, because that code needs PyTorch.
+
+### Keep the server in sync with latvian_htr
+
+The server has its own copies of things the AI side may change. When one of these files changes in `latvian_htr`, the matching server file has to be updated:
+
+| latvian_htr | server |
+|---|---|
+| `alphabet.py` (letters, punctuation, decoding) | `server/alphabet_table.py` |
+| `model.py` (layers, pooling sizes) | `forward()` and `check_architecture()` in `server/htr_numpy.py` |
+| `synthetic_data.py` `TARGET_HEIGHT` (now 64) | `TARGET_HEIGHT` in `server/htr_numpy.py` |
+| `infer.py` / `dataset.py` (image preparation, beam width) | `prepare_line()` and `BEAM_WIDTH` in `server/htr_numpy.py` |
+
+If the model file no longer fits the server's copy, the server does not return wrong text: recognition fails, users see "Atpazīšana pašlaik nav pieejama", and the error log names the layer that does not match.
 
 ## Running it on your computer
 
@@ -91,11 +105,10 @@ In the `web-app` folder: `npm run build`. This creates `web-app/dist`.
 Sign in at https://eu.pythonanywhere.com. In the **Files** tab create `/home/cloudy1337/LVRA` and upload into it:
 
 ```
-/home/cloudy1337/LVRA/web-app/server/        app.py, htr_numpy.py
+/home/cloudy1337/LVRA/web-app/server/        app.py, htr_numpy.py, alphabet_table.py
 /home/cloudy1337/LVRA/web-app/dist/          everything from dist (index.html, favicon.svg, assets/)
 /home/cloudy1337/LVRA/web-app/requirements.txt
-/home/cloudy1337/LVRA/latvian_htr/alphabet.py
-/home/cloudy1337/LVRA/latvian_htr/checkpoints/crnn_step2000.pt
+/home/cloudy1337/LVRA/latvian_htr/checkpoints_v2/crnn_step30000.pt
 ```
 
 Do not upload `node_modules`. The free plan has little disk space, so upload only the one checkpoint the server uses. An easier way for many files: zip them on your computer, upload the zip, then in a **Bash console** go to the folder with `cd ~` and unpack it with `unzip` followed by the zip's name.
@@ -139,7 +152,7 @@ On the Web tab switch on **Force HTTPS** (copying to the clipboard needs HTTPS),
 
 ### 7. Check
 
-- https://cloudy1337.eu.pythonanywhere.com/api/health should show `true` for `website_built`, `checkpoint_found` and `alphabet_found`. `model_loaded` turns `true` after the first recognition.
+- https://cloudy1337.eu.pythonanywhere.com/api/health should show `true` for `website_built` and `checkpoint_found`. `model_loaded` turns `true` after the first recognition.
 - https://cloudy1337.eu.pythonanywhere.com shows the app.
 - If something fails, the Web tab has an **Error log** link.
 
@@ -150,7 +163,7 @@ Free web apps switch off after a while. The Web tab shows the date; press the bu
 ### Updating
 
 - Website changed: `npm run build`, upload the new `dist` folder (replace the old one), press **Reload**.
-- New model: the simplest way is to upload the new weights into `latvian_htr/checkpoints/` under the name `crnn_step2000.pt` (replacing the old file) and press **Reload**. To use a file with another name, add an `LVRA_CHECKPOINT` line to the WSGI file, written like the `LVRA_DATA_DIR` line, with the full path of the new file. If the network in `latvian_htr/model.py` was changed (layers, sizes), `server/htr_numpy.py` must be updated to match.
+- New model: the simplest way is to upload the new weights into `latvian_htr/checkpoints_v2/` under the name `crnn_step30000.pt` (replacing the old file) and press **Reload**. To use a file with another name, add an `LVRA_CHECKPOINT` line to the WSGI file, written like the `LVRA_DATA_DIR` line, with the full path of the new file. If `alphabet.py`, `model.py`, `TARGET_HEIGHT` or the image preparation changed, update the server first (see "Keep the server in sync with latvian_htr").
 
 ## Server API
 
@@ -166,7 +179,7 @@ Answer `200`: `text/csv`, the same `labels.csv` with the text filled in. Errors:
 
 Limits: 100 lines, 16 MB per request, line images up to 4000 x 1000 px.
 
-`GET /api/health`: JSON with `website_built`, `checkpoint_found`, `alphabet_found`, `model_loaded`.
+`GET /api/health`: JSON with `website_built`, `checkpoint_found`, `model_loaded`.
 
 ## Training data
 
@@ -203,7 +216,7 @@ Recognition service     src/recognition/types.ts (interface)
 Recognised text         src/recognition/segments.ts (uncertain word highlighting, switched off)
 Editing and copying     src/editor/editorDom.ts, src/components/ResultEditor.tsx,
                         src/utils/clipboard.ts
-Server                  server/app.py, server/htr_numpy.py
+Server                  server/app.py, server/htr_numpy.py, server/alphabet_table.py
 ```
 
 Errors from every layer use one set of codes (`src/recognition/errors.ts`). The UI turns each code into a plain Latvian message, so no technical error text reaches the user.
@@ -216,7 +229,7 @@ Fixed product values are in `src/config/config.ts`: backend (`server` or `mock`)
 
 ## Known limitations
 
-- The AI is trained only on 36 phrases in one handwriting-style font. It reads those well and new handwriting mostly wrongly. It needs a larger text corpus, more fonts, more varied backgrounds and real handwritten lines (collected with consent, see Training data).
-- On PythonAnywhere a page of about 20 lines takes a few seconds to recognise with numpy.
+- The AI (`crnn_step30000.pt`) reads new sentences drawn with its handwriting fonts with almost no errors, but on the 41 real handwritten lines in `latvian_htr/data/real_dataset` about 78% of the characters come out wrong. It needs to be trained on real handwriting (collected with consent, see Training data).
+- Speed: about 0.5 to 0.8 s per line on a fast PC, so a page of 15 to 20 lines takes roughly 10 to 15 s there. PythonAnywhere is usually slower. The app gives up after 60 s (`recognitionTimeoutMs` in `src/config/config.ts`).
 - Very large photos may fail to open on older phones with little memory. The user then sees a message to try another image.
 - HEIC photos open only in browsers that support HEIC (mainly Safari).
