@@ -38,6 +38,7 @@
 | Apmācība ar CTC, Adam, `ReduceLROnPlateau`, gradientu ierobežošana | ✅ |
 | Viena attēla atpazīšana (`infer.py`) ar CTC Prefix Beam Search | ✅ |
 | Novērtēšana ar CER (`evaluate.py`, greedy dekodēšana) | ✅ |
+| Marķējuma pārbaudes rīks ar attēla apgriešanu un tumšo tēmu (`verify_labels.py`) | ✅ |
 | Web lietotnes saskarne latviešu valodā | ✅ |
 | WER, kā arī Greedy un Beam Search salīdzinājums | ❌ |
 | Web lietotnes savienojums ar modeli (backend API) | ❌ |
@@ -247,6 +248,69 @@ filename,text
 
 Teksts nedrīkst saturēt rakstzīmes ārpus alfabēta. Pārsvītrotu vārdu marķēšanai izmanto `¤`.
 
+### Marķēšanas noteikumi
+
+Reālo datu rindas tiek marķētas pēc šādiem principiem (tā sagatavotas jaunākās partijas):
+
+- teksts tiek pārrakstīts **tieši tā, kā tas uzrakstīts attēlā** — bez gramatikas un pareizrakstības labošanas un bez vārdu «pielāgošanas» pareiziem latviešu vārdiem; autora kļūdas paliek etiķetē;
+- viens attēla fails = viena teksta rinda; faila nosaukums sastāv no četriem cipariem (`0042.png`), numerācija turpinās bez atkārtojumiem;
+- tiek pārrakstīts tikai **audzēkņa rokraksts**: skolotāja sarkanie labojumi, atzīmes un punkti etiķetē netiek iekļauti;
+- **pārsvītrotie vārdi** jaunākajās partijās etiķetē tika **izlaisti** (nevis aizvietoti ar `¤`), bet rindas, kurās pārsvītrota lielākā daļa teksta, netika iekļautas vispār. Ja vēlaties, lai modelis mācītos atpazīt svītrojumus, šajās vietās jāliek `¤` (skat. [Rakstzīmju kopa](#rakstzīmju-kopa));
+- vārdi, kurus attēlā nevar droši izlasīt, ir pārrakstīti pēc labākā minējuma — tos vēlams pārbaudīt ar zemāk aprakstīto rīku;
+- etiķetē drīkst būt tikai alfabēta rakstzīmes. Rīks `verify_labels.py` alfabētu **nepārbauda**, tāpēc pirms apmācības jāpārliecinās, ka `encode` izdodas visām rindām.
+
+### Marķējuma pārbaudes rīks
+
+`verify_labels.py` ir neliela darbvirsmas programma (Python + Tkinter, tumšā tēma), kas ļauj rindu pa rindai pārbaudīt un labot `labels.csv`, vienlaikus redzot attēlu.
+
+```text
+┌───────────────────────────┬──────────────────────────────────┐
+│ 42 / 143                  │                                  │
+│ 0042.png                  │                                  │
+│ ┌───────────────────────┐ │        rindas attēls             │
+│ │ rindas teksts         │ │   (mērogots logam, ar apgriešanu)│
+│ │ (var labot)           │ │                                  │
+│ └───────────────────────┘ │                                  │
+│ [Apgriezt] [Oriģināls]    │                                  │
+└───────────────────────────┴──────────────────────────────────┘
+```
+
+**Palaišana** (no mapes, kur atrodas fails):
+
+```bash
+pip install pillow
+python verify_labels.py
+```
+
+Tkinter ir Python standarta komplektā (Windows). Attēlu mape un `labels.csv` ceļš ir norādīti faila sākumā (`FOLDER`, `CSV_PATH`); uz cita datora tie jāpielāgo. Pēc noklusējuma: `C:\Users\r0mka\Desktop\LVRA\latvian_htr\data\real_dataset\images`.
+
+> **Uzmanību:** rīks lasa `labels.csv` no **attēlu mapes** (`images/`), bet šajā README (un apmācības kodā) `labels.csv` atrodas mapē `data/real_dataset/` blakus `images/`. Ja pārbaudi veicat `images/labels.csv`, pēc tam fails jāsinhronizē ar `data/real_dataset/labels.csv` vai jānomaina `CSV_PATH` rīka kodā.
+
+**Taustiņi un darbības**
+
+| Darbība | Taustiņš / vadīkla |
+| --- | --- |
+| Saglabāt labojumu un pāriet uz nākamo rindu | `Enter` |
+| Iepriekšējā / nākamā rinda bez labojuma | `Alt+←` / `Alt+→` (vai `Ctrl+←` / `Ctrl+→`) |
+| 10 rindas atpakaļ / uz priekšu | `PageUp` / `PageDown` |
+| Pāriet uz numuru vai faila nosaukumu (piem., `0215`) | `Ctrl+G` |
+| Saglabāt `labels.csv` nekavējoties | `Ctrl+S` |
+| Atcelt labojumus pašreizējā rindā (atgriezt sākotnējo tekstu) | `Ctrl+Z` |
+| Apgriezt attēlu pēc iezīmētās zonas | `Ctrl+R` vai poga «Apgriezt» |
+| Atgriezt neapgriezto oriģinālu | `Ctrl+B` vai poga «Oriģināls» |
+| Noņemt iezīmējumu | `Esc` |
+
+**Attēla apgriešana.** Attēlā ar nospiestu kreiso peles pogu jāiezīmē zona (dzeltens raustīts rāmis) un jānospiež `Ctrl+R`. Apgrieztais attēls **uzreiz pārraksta failu** mapē `images/`; pirms pirmās apgriešanas oriģināls tiek nokopēts mapē `images/_originals/`. Pie faila nosaukuma parādās atzīme «[apgriezts]». Atgriežot oriģinālu (`Ctrl+B`), kopija no `_originals/` tiek atjaunota un dzēsta.
+
+**Saglabāšana.**
+
+- Attēla apgriešana tiek saglabāta uz diska **nekavējoties**.
+- Teksta labojumi tiek ierakstīti `labels.csv` pie `Enter`, `Ctrl+S` un loga aizvēršanas. Pārvietojoties ar `Alt+←/→` vai `PageUp/PageDown`, labojums tiek atcerēts programmā, bet failā parādās pie nākamā `Enter` / `Ctrl+S` / aizvēršanas.
+- Pirms pirmās saglabāšanas tiek izveidota rezerves kopija `labels.csv.bak`.
+- Pozīcija tiek atcerēta failā `.verify_progress` (tajā pašā mapē), un nākamreiz programma turpina no tās rindas.
+
+> Ja pēc apgriešanas atkārtoti palaižat attēlu sagriešanas skriptu, tas var pārrakstīt apgrieztos failus — oriģināli paliek `_originals/`.
+
 ### Sintētiskie dati
 
 `synthetic_data.py` katru reizi ģenerē jaunu piemēru:
@@ -304,10 +368,12 @@ LVRA/
 │   ├── train.py                  # apmācība
 │   ├── infer.py                  # viena attēla atpazīšana
 │   ├── evaluate.py               # CER novērtēšana
+│   ├── verify_labels.py          # marķējuma pārbaudes rīks (GUI, tumšā tēma, attēla apgriešana)
 │   ├── requirements.txt
 │   ├── fonts/                    # fonti sintētiskajiem datiem
 │   ├── checkpoints_v2/           # apmācītā modeļa svari (crnn_step30000.pt, ≈ 35 MB)
 │   └── data/real_dataset/        # reālie dati (labels.csv, images/, corpus.txt)
+│       └── images/               # rindu attēli; pārbaudes rīks šeit izveido _originals/, labels.csv.bak, .verify_progress
 │
 ├── web-app/                      # React/Vite lietotne
 │   ├── src/
@@ -337,13 +403,15 @@ LVRA/
 - **Novērtēšana** šobrīd tikai CER ar greedy dekodēšanu; WER un Beam Search novērtējuma nav.
 - **Fontu licences:** pirms projekta publiskas izplatīšanas jāpārbauda mapē `fonts/` esošo fontu licences.
 - `web-app/package.json` satur tikai skriptus `dev` un `dev:phone` (nav `build`).
+- **Pārbaudes rīks (`verify_labels.py`):** ceļi ir ierakstīti kodā (`FOLDER`, `CSV_PATH`) un attiecas uz konkrētu datoru; rīks lasa `labels.csv` no `images/` mapes, nevis no `data/real_dataset/`; tas nepārbauda, vai etiķete satur tikai alfabēta rakstzīmes; apgriešana pārraksta attēlu failus (oriģināli paliek `_originals/`); projektā nav automātisku testu šim rīkam.
+- **Pārsvītrotie vārdi:** jaunākajās marķēto datu partijās tie ir izlaisti, nevis atzīmēti ar `¤`, tāpēc modelis no šīm rindām neiemācās atpazīt svītrojumus.
 
 ---
 
 ## Ceļvedis
 
 1. Savākt un marķēt lielāku, daudzveidīgāku reālā rokraksta datu kopu (dažādi cilvēki, pildspalvas, papīrs, foto kvalitāte).
-2. Atdalīt validācijas kopu no apmācības un regulāri mērīt CER.
+2. Atdalīt validācijas kopu no apmācības un regulāri mērīt CER; visu jauno marķējumu pirms apmācības pārbaudīt ar `verify_labels.py`.
 3. Pievienot WER un salīdzināt Greedy ar Beam Search.
 4. Papildināt augmentāciju reālajiem datiem (papīra tekstūra, ēnas, perspektīva, apgaismojums).
 5. Izveidot backend API un savienot web lietotni ar modeli.
