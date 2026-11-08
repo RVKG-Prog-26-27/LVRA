@@ -1,58 +1,84 @@
 """
-Генератор синтетических (искусственных) данных.
+Synthetic data generator (v2).
 
-Проблема: чтобы научить нейросеть читать рукописный текст, нужны тысячи
-фотографий настоящего почерка с подписями. У нас их пока нет.
-Решение: берём текст, «рисуем» его шрифтом на картинке, а потом слегка
-портим картинку (наклоняем, поворачиваем, добавляем шум и размытие), чтобы
-она была похожа на неидеальный человеческий почерк.
-
-Это временная заглушка, а не замена настоящим данным. Как только появятся
-настоящие сканы, их подключают через класс RealHTRDataset (файл dataset.py).
-
-Чем лучше шрифт, тем реалистичнее картинки: положи в папку fonts/ любой
-шрифт .ttf в стиле рукописного, который поддерживает латышские буквы
-(ā č ē ģ ī ķ ļ ņ š ū ž), и генератор подхватит его сам.
+What changed vs. v1 (see notes in the chat):
+  * TARGET_HEIGHT 32 -> 64 and the text is rendered BIG and downscaled, so letters
+    (and diacritics) stay readable. v1 gave ~5 px per character.
+  * The canvas height comes from font metrics, not from the text's own bounding box,
+    so letter size no longer changes from line to line.
+  * Texts are random word sequences (random_line), not a few fixed lines.
+  * Augmentation mimics photos of notebook pages: grid paper, grey/uneven light,
+    wavy baseline, thicker/thinner ink, noise, blur.
 """
 
-import glob       # поиск файлов по шаблону (например, все *.ttf в папке)
-import os         # работа с путями к файлам и папкам
-import random     # случайные числа
+import functools
+import glob
+import os
+import random
 
-import numpy as np                                       # быстрые операции с массивами чисел
-from PIL import Image, ImageDraw, ImageFilter, ImageFont  # Pillow: рисование и обработка картинок
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
-# Папка со шрифтами лежит рядом с этим файлом, в подпапке fonts.
-# __file__ - путь к текущему файлу, dirname берёт из него папку.
+from alphabet import ALPHABET
+
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
-# Запасной шрифт на случай, если в папке fonts ничего нет (путь для Linux).
-FALLBACK_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+# Candidate paths for a default font that ships with the OS, checked in order.
+# Must support Latvian diacritics (ā č ē ģ ī ķ ļ ņ š ū ž).
+_FALLBACK_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",   # Linux
+    "C:\\Windows\\Fonts\\arial.ttf",                      # Windows
+    "C:\\Windows\\Fonts\\segoeui.ttf",                    # Windows
+    "/System/Library/Fonts/Supplemental/Arial.ttf",       # macOS
+    "/Library/Fonts/Arial.ttf",                           # macOS
+]
 
-# Высота всех картинок после обработки - ровно 32 пикселя. Нейросеть ждёт
-# картинки одной высоты, а вот ширина у каждой своя (длинная строка - широкая картинка).
-TARGET_HEIGHT = 32
+
+def _find_fallback_font() -> str:
+    for path in _FALLBACK_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        "No usable default font found and fonts/ is empty. "
+        "Put at least one .ttf/.otf file (with Latvian diacritics support) into the fonts/ folder."
+    )
+
+
+FALLBACK_FONT = _find_fallback_font()
+
+TARGET_HEIGHT = 64  # fixed line height fed into the CNN (model.py expects exactly 64)
 
 
 def _available_fonts() -> list[str]:
-    """Возвращает список путей к шрифтам, которые можно использовать.
-
-    Нижнее подчёркивание в начале имени - привычка программистов: так
-    помечают функции «для внутреннего пользования», их вызывают только
-    внутри этого файла.
-    """
-    # Ищем все файлы .ttf и .otf в папке fonts и склеиваем два списка в один.
     fonts = glob.glob(os.path.join(FONT_DIR, "*.ttf")) + glob.glob(os.path.join(FONT_DIR, "*.otf"))
-    # Если нашли хоть один шрифт - возвращаем их, иначе - запасной.
     return fonts if fonts else [FALLBACK_FONT]
 
 
-def _default_corpus() -> list[str]:
-    """Маленький встроенный список латышских слов и фраз.
+def _glyph_bytes(font: ImageFont.FreeTypeFont, ch: str) -> bytes:
+    img = Image.new("L", (100, 100), 0)
+    ImageDraw.Draw(img).text((10, 10), ch, font=font, fill=255)
+    return img.tobytes()
 
-    «Корпус» - это набор текстов для обучения. Используется, если нет
-    файла data/corpus.txt с большим набором своих текстов.
-    """
+
+@functools.lru_cache(maxsize=None)
+def font_charset(font_path: str) -> frozenset:
+    """Which characters of our alphabet this font can really draw.
+    A missing glyph is drawn as an empty box (.notdef) while the label keeps the real letter -
+    the network would then learn 'box = a / ā / š / ž ...', which is impossible. So we never
+    put such characters into texts rendered with this font."""
+    font = ImageFont.truetype(font_path, 48)
+    notdef = _glyph_bytes(font, "\uFFFF")
+    ok = {" "}
+    for ch in ALPHABET[1:]:  # [0] is the CTC blank
+        if ch != " " and _glyph_bytes(font, ch) != notdef:
+            ok.add(ch)
+    return frozenset(ok)
+
+
+# --------------------------------------------------------------------------- texts
+
+def _default_corpus() -> list[str]:
+    """Small built-in Latvian word/phrase list, used if data/corpus.txt is absent."""
     return [
         "Labdien", "paldies", "lūdzu", "sveiki", "atā", "jā", "nē",
         "Rīga", "Latvija", "valoda", "grāmata", "skola", "pilsēta",
@@ -65,124 +91,170 @@ def _default_corpus() -> list[str]:
     ]
 
 
-def load_corpus() -> list[str]:
-    """Загружает тексты для обучения: из файла data/corpus.txt, а если его нет - встроенный список."""
-    # Собираем путь к файлу: <папка этого файла>/data/corpus.txt
+def load_words() -> list[str]:
+    """All words (punctuation kept attached) from data/corpus.txt; fallback to the built-in list."""
     corpus_path = os.path.join(os.path.dirname(__file__), "data", "corpus.txt")
+    words: list[str] = []
     if os.path.exists(corpus_path):
-        # Открываем файл в кодировке utf-8, чтобы латышские буквы читались правильно.
         with open(corpus_path, encoding="utf-8") as f:
-            # Берём каждую строку, убираем пробелы по краям и выбрасываем пустые.
-            lines = [ln.strip() for ln in f if ln.strip()]
-        if lines:
-            return lines
-    # Файла нет или он пустой - используем маленький встроенный список.
-    return _default_corpus()
+            words = f.read().split()
+    if not words:
+        words = [w for line in _default_corpus() for w in line.split()]
+    return words
 
+
+def load_corpus() -> list[str]:
+    """Kept for backward compatibility - returns the word pool."""
+    return load_words()
+
+
+def _random_number() -> str:
+    a, b = random.randint(0, 9999), random.randint(0, 99)
+    return random.choice([str(a), f"{a},{b}", f"({a})", f"{a}.", f"{a}%", f"{b})", f"{a} - {b}"])
+
+
+def random_line(words: list[str], max_chars: int = 60, allowed=None) -> str:
+    """A random 'handwritten line': random words glued together, 6..max_chars characters.
+    `allowed` - set of characters the font can draw; words/numbers with other characters are skipped."""
+    if allowed is not None:
+        words = [w for w in words if set(w) <= allowed] or [w for w in words if set(w) <= allowed | set("0123456789")]
+        if not words:
+            words = ["a"]
+    target = random.randint(6, max_chars)
+    parts: list[str] = []
+    length = 0
+    guard = 0
+    while length < target and guard < 200:
+        guard += 1
+        w = _random_number() if random.random() < 0.07 else random.choice(words)
+        if allowed is not None and not set(w) <= allowed:
+            continue
+        extra = len(w) + (1 if parts else 0)
+        if length + extra > max_chars:
+            if parts:
+                break
+            continue
+        parts.append(w)
+        length += extra
+    return " ".join(parts) if parts else random.choice(words)[:max_chars]
+
+
+def make_sample(words: list[str], max_chars: int = 60, augment: bool = True) -> tuple[Image.Image, str]:
+    """Pick a random font, build a text this font can fully draw, render it. Returns (image, text)."""
+    fonts = _available_fonts()
+    font_path = random.choice(fonts)
+    allowed = font_charset(font_path)
+    text = random_line(words, max_chars, allowed)
+    return render_text_line(text, font_path=font_path, augment=augment), text
+
+
+# --------------------------------------------------------------------------- rendering
 
 def render_text_line(text: str, font_path: str | None = None, augment: bool = True) -> Image.Image:
-    """Рисует текст `text` одной строкой на серой (чёрно-белой) картинке фиксированной высоты.
-
-    augment=True значит «испортить» картинку случайными искажениями.
-    """
-    # Если шрифт не указали - выбираем случайный из доступных (для разнообразия).
+    """Render `text` as a grayscale line image of height TARGET_HEIGHT."""
     font_path = font_path or random.choice(_available_fonts())
-    # Размер шрифта тоже случайный: от 26 до 40, чтобы буквы получались разного размера.
-    font_size = random.randint(26, 40)
+    font_size = random.randint(56, 88)  # big on purpose; downscaled at the end
     font = ImageFont.truetype(font_path, font_size)
+    ascent, descent = font.getmetrics()
 
-    # Нам нужно знать, какого размера получится текст, чтобы сделать подходящий холст.
-    # Для этого создаём «пробную» крошечную картинку и измеряем на ней текст.
-    # Режим "L" - оттенки серого (один канал вместо трёх RGB), 255 - белый цвет.
-    dummy = Image.new("L", (10, 10), color=255)
-    # textbbox возвращает рамку вокруг текста: (левый, верхний, правый, нижний край).
-    bbox = ImageDraw.Draw(dummy).textbbox((0, 0), text, font=font)
-    # Ширина и высота холста = размер рамки + по 20 пикселей запаса (отступы).
-    # max(1, ...) защищает от нулевого размера, который сломал бы картинку.
-    w = max(1, bbox[2] - bbox[0]) + 20
-    h = max(1, bbox[3] - bbox[1]) + 20
+    dummy = ImageDraw.Draw(Image.new("L", (10, 10), color=255))
+    bbox = dummy.textbbox((0, 0), text, font=font)
 
-    # Создаём настоящий белый холст и берём «карандаш» (draw), чтобы на нём писать.
+    pad_x = int(font_size * random.uniform(0.15, 0.5))
+    pad_y = int(font_size * random.uniform(0.15, 0.3))
+    top = min(0, bbox[1])
+    bottom = max(ascent + descent, bbox[3])
+    w = max(1, bbox[2] - bbox[0]) + 2 * pad_x
+    h = (bottom - top) + 2 * pad_y
+
+    ink = random.randint(0, 90)
     img = Image.new("L", (w, h), color=255)
-    draw = ImageDraw.Draw(img)
-    # Пишем текст чёрным (fill=0). Координаты сдвигаем на отступ 10 и на
-    # поправку bbox, чтобы текст оказался строго по центру холста.
-    draw.text((10 - bbox[0], 10 - bbox[1]), text, font=font, fill=0)
+    ImageDraw.Draw(img).text((pad_x - bbox[0], pad_y - top), text, font=font, fill=ink)
 
     if augment:
-        # Портим картинку случайными искажениями (функция ниже).
         img = _augment(img)
 
-    # Приводим к одной высоте 32 пикселя, сохраняя пропорции.
-    img = _resize_keep_ratio(img, TARGET_HEIGHT)
-    return img
+    w, h = img.size
+    new_w = max(1, int(w * (TARGET_HEIGHT / h)))
+    return img.resize((new_w, TARGET_HEIGHT), Image.BILINEAR)
+
+
+def _paper_background(w: int, h: int) -> np.ndarray:
+    """Grey-ish paper, optionally with notebook grid lines (like the real scans)."""
+    level = random.randint(185, 255)
+    bg = np.full((h, w), level, dtype=np.float32)
+
+    if random.random() < 0.55:  # grid paper
+        cell = max(8, int(h * random.uniform(0.18, 0.4)))
+        thick = max(1, int(round(h / 70)))
+        dark = random.randint(25, 80)
+        ox, oy = random.randint(0, cell - 1), random.randint(0, cell - 1)
+        for x in range(ox, w, cell):
+            bg[:, x:x + thick] -= dark
+        for y in range(oy, h, cell):
+            bg[y:y + thick, :] -= dark
+    return np.clip(bg, 0, 255)
 
 
 def _augment(img: Image.Image) -> Image.Image:
-    """Случайно искажает картинку, чтобы она напоминала живой почерк."""
-    # 1) Лёгкий случайный поворот на угол от -3 до +3 градусов.
-    #    expand=True - увеличить холст, чтобы углы не обрезались,
-    #    fillcolor=255 - новые пустые уголки закрасить белым.
-    angle = random.uniform(-3, 3)
-    img = img.rotate(angle, expand=True, fillcolor=255)
+    # thicker ink (MinFilter grows dark strokes on a light background)
+    if random.random() < 0.3:
+        img = img.filter(ImageFilter.MinFilter(3))
 
-    # 2) Наклон (shear) - как будто человек пишет курсивом с наклоном вправо или влево.
-    #    Делается через «аффинное преобразование» - формулу, которая сдвигает
-    #    каждую строку пикселей на своё расстояние (чем выше, тем сильнее сдвиг).
-    shear = random.uniform(-0.25, 0.25)
+    # rotation + shear (slanted handwriting)
+    img = img.rotate(random.uniform(-2, 2), expand=True, fillcolor=255)
+    shear = random.uniform(-0.3, 0.3)
     w, h = img.size
     img = img.transform(
-        (w + int(abs(shear) * h), h),  # новый размер: чуть шире, чтобы наклонённый текст влез
-        Image.AFFINE,                  # тип преобразования - аффинное
-        (1, shear, -shear * h if shear < 0 else 0, 0, 1, 0),  # шесть чисел-коэффициентов формулы
-        fillcolor=255,                 # пустые места - белые
+        (w + int(abs(shear) * h), h),
+        Image.AFFINE,
+        (1, shear, -shear * h if shear < 0 else 0, 0, 1, 0),
+        fillcolor=255,
     )
 
-    # 3) В половине случаев (random.random() < 0.5) слегка размываем картинку,
-    #    как будто фото чуть не в фокусе. radius - сила размытия.
-    if random.random() < 0.5:
-        img = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.2, 0.8)))
-
-    # 4) Ещё в половине случаев добавляем «шум» - случайные зёрнышки, как на плохой фотографии.
-    if random.random() < 0.5:
-        arr = np.array(img).astype(np.float32)  # картинка -> таблица чисел (яркость каждого пикселя)
-        # Для каждого пикселя берём случайное число (нормальное распределение
-        # вокруг 0) и прибавляем к яркости.
-        noise = np.random.normal(0, random.uniform(3, 10), arr.shape)
-        # Яркость должна оставаться от 0 до 255, поэтому «обрезаем» всё лишнее (clip),
-        # а потом возвращаем целые числа (uint8) и собираем картинку обратно.
-        arr = np.clip(arr + noise, 0, 255).astype(np.uint8)
+    # wavy baseline: shift every column up/down by a slow sine wave
+    w, h = img.size
+    amp = int(random.uniform(0, 0.05) * h)
+    if amp > 0:
+        img = ImageOps.expand(img, border=(0, amp, 0, amp), fill=255)
+        arr = np.array(img)
+        wavelength = random.uniform(300, 1200)
+        phase = random.uniform(0, 2 * np.pi)
+        shifts = np.round(amp * np.sin(2 * np.pi * np.arange(arr.shape[1]) / wavelength + phase)).astype(int)
+        for x in range(arr.shape[1]):
+            arr[:, x] = np.roll(arr[:, x], shifts[x])
         img = Image.fromarray(arr)
+
+    # paper + uneven lighting, ink stays darker than paper
+    w, h = img.size
+    text = np.array(img).astype(np.float32)
+    paper = _paper_background(w, h)
+    out = np.minimum(text, paper)
+    light = np.linspace(random.uniform(0.75, 1.0), random.uniform(0.75, 1.0), w, dtype=np.float32)
+    out = out * light[None, :]
+    img = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+
+    if random.random() < 0.6:
+        img = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.3, 1.8)))
+
+    if random.random() < 0.6:
+        arr = np.array(img).astype(np.float32)
+        arr += np.random.normal(0, random.uniform(2, 12), arr.shape)
+        img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
     return img
 
 
-def _resize_keep_ratio(img: Image.Image, target_height: int) -> Image.Image:
-    """Меняет высоту картинки до target_height, а ширину подгоняет так, чтобы не было растяжения."""
-    w, h = img.size
-    # Во сколько раз меняется высота, во столько же меняем и ширину.
-    # Это и значит «сохранить пропорции». max(1, ...) - чтобы ширина не стала нулём.
-    new_w = max(1, int(w * (target_height / h)))
-    # BILINEAR - способ плавного пересчёта пикселей при изменении размера.
-    return img.resize((new_w, target_height), Image.BILINEAR)
-
-
-def generate_batch(n: int, corpus: list[str] | None = None) -> list[tuple[Image.Image, str]]:
-    """Делает n обучающих примеров: пары «картинка + правильный текст»."""
-    # Если набор текстов не передали - загружаем свой.
-    corpus = corpus or load_corpus()
+def generate_batch(n: int, words: list[str] | None = None) -> list[tuple[Image.Image, str]]:
+    words = words or load_words()
     samples = []
-    for _ in range(n):  # «_» - имя для переменной, значение которой нам не нужно
-        text = random.choice(corpus)                    # берём случайный текст
-        samples.append((render_text_line(text), text))  # рисуем его и запоминаем пару
+    for _ in range(n):
+        samples.append(make_sample(words))
     return samples
 
 
-# Этот блок срабатывает ТОЛЬКО если файл запустили напрямую («python synthetic_data.py»),
-# а не импортировали из другого файла. Удобно для быстрой проверки.
 if __name__ == "__main__":
-    os.makedirs("samples", exist_ok=True)  # создаём папку samples (если уже есть - не ругаемся)
-    # Генерируем 500 картинок и сохраняем каждую в файл.
-    for i, (img, text) in enumerate(generate_batch(500)):
+    os.makedirs("samples", exist_ok=True)
+    for i, (img, text) in enumerate(generate_batch(10000)):
         img.save(f"samples/sample_{i}.png")
         print(f"sample_{i}.png -> {text!r}  size={img.size}")

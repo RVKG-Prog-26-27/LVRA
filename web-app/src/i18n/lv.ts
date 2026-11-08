@@ -1,8 +1,12 @@
 /**
  * All user-facing texts in Latvian. Keeping them in one file makes wording
+<<<<<<< HEAD
  * reviews easy and keeps technical terms out of components.
  * The long texts of the terms of use and the privacy notice are in
  * TermsDialog.tsx and PrivacyNotice.tsx.
+=======
+ * reviews easy and keeps technical terms out of components
+>>>>>>> origin/web-app
  */
 import type { AppErrorCode } from '../recognition/errors';
 

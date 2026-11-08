@@ -1,17 +1,17 @@
 /**
- * DOM helpers for the result editor (a contenteditable element).
+ * DOM helpers for the result editor (a contenteditable element)
  *
  * The editor holds plain text nodes with "\n" line breaks (rendered with
  * white-space: pre-wrap) plus <mark> elements around uncertain words. Each
  * mark remembers its original word; once the user changes it, the mark is
- * removed, which is how the highlight disappears after editing.
+ * removed, which is how the highlight disappears after editing
  */
 import type { TextSegment } from '../recognition/segments';
 
 const MARK_ATTR = 'data-original';
 const SENTINEL_ATTR = 'data-sentinel';
 
-/** Replaces the editor content with the given segments. */
+/** Replaces the editor content with the given segments */
 export function renderSegments(container: HTMLElement, segments: TextSegment[]): void {
   container.textContent = '';
   const doc = container.ownerDocument;
@@ -31,7 +31,7 @@ export function renderSegments(container: HTMLElement, segments: TextSegment[]):
 
 /**
  * A trailing <br> lets the caret sit on an empty last line (a lone trailing
- * "\n" does not render in pre-wrap). It contributes no text.
+ * "\n" does not render in pre-wrap); It contributes no text
  */
 export function ensureSentinel(container: HTMLElement): void {
   const last = container.lastChild;
@@ -42,7 +42,7 @@ export function ensureSentinel(container: HTMLElement): void {
   container.appendChild(br);
 }
 
-/** Removes the highlight from every uncertain word the user has changed. Returns true if anything changed. */
+/** Removes the highlight from every uncertain word the user has changed - returns true if anything changed */
 export function unwrapEditedMarks(container: HTMLElement): boolean {
   let changed = false;
   container.querySelectorAll<HTMLElement>(`mark[${MARK_ATTR}]`).forEach((mark) => {
@@ -56,7 +56,7 @@ export function unwrapEditedMarks(container: HTMLElement): boolean {
   return changed;
 }
 
-/** Plain text of the editor, with line breaks as "\n". */
+/** Plain text of the editor, with line breaks as "\n" */
 export function extractText(container: HTMLElement): string {
   let out = '';
   const walk = (node: Node) => {
@@ -66,7 +66,7 @@ export function extractText(container: HTMLElement): string {
       } else if (child instanceof HTMLBRElement) {
         if (!child.hasAttribute(SENTINEL_ATTR)) out += '\n';
       } else if (child instanceof HTMLElement) {
-        // Some browsers wrap new lines in <div>/<p>; treat them as line breaks.
+        // Some browsers wrap new lines in <div>/<p>; treat them as line breaks
         const isBlock = child.tagName === 'DIV' || child.tagName === 'P';
         if (isBlock && out !== '' && !out.endsWith('\n')) out += '\n';
         walk(child);
@@ -77,7 +77,7 @@ export function extractText(container: HTMLElement): string {
   return out;
 }
 
-/** Caret position as a character offset from the start of the editor, or null. */
+/** Caret position as a character offset from the start of the editor, or null */
 export function getCaretOffset(container: HTMLElement): number | null {
   const selection = container.ownerDocument.getSelection();
   if (!selection || selection.rangeCount === 0) return null;
@@ -89,7 +89,7 @@ export function getCaretOffset(container: HTMLElement): number | null {
   return before.toString().length;
 }
 
-/** Places the caret at a character offset from the start of the editor. */
+/** Places the caret at a character offset from the start of the editor */
 export function setCaretOffset(container: HTMLElement, offset: number): void {
   const doc = container.ownerDocument;
   const selection = doc.getSelection();
@@ -115,7 +115,7 @@ export function setCaretOffset(container: HTMLElement, offset: number): void {
   selection.addRange(range);
 }
 
-/** Inserts plain text at the caret (used for Enter and paste so no HTML gets in). */
+/** Inserts plain text at the caret (used for Enter and paste so no HTML gets in) */
 export function insertPlainText(container: HTMLElement, text: string): void {
   const doc = container.ownerDocument;
   const selection = doc.getSelection();

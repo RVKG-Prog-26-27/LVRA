@@ -1,4 +1,8 @@
 node_modules
 *.log
+<<<<<<< HEAD
 .DS_Store
 __pycache__/
+=======
+.DS_Store
+>>>>>>> origin/web-app

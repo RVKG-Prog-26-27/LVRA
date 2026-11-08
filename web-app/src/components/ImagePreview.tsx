@@ -11,7 +11,7 @@ interface Props {
 
 const PREVIEW_MAX = 1400;
 
-/** Shows the image exactly as it will be sent (same rotation, drawn by the same code). */
+/** Shows the image exactly as it will be sent - same rotation, drawn by the same code */
 export function ImagePreview({ image, rotation, busy }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -21,7 +21,7 @@ export function ImagePreview({ image, rotation, busy }: Props) {
     try {
       drawRotated(canvas, image, rotation, PREVIEW_MAX, PREVIEW_MAX);
     } catch {
-      // A failed preview is not fatal; the real processing reports its own error.
+      // A failed preview is not fatal; the real processing reports its own error
     }
     return () => {
       canvas.width = 0;

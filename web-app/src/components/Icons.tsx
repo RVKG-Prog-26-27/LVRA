@@ -1,4 +1,4 @@
-/** Small inline icons (no external icon requests). Decorative, hidden from screen readers. */
+/** Small inline icons (no external icon requests). Decorative, hidden from screen readers */
 const common = {
   width: 20,
   height: 20,

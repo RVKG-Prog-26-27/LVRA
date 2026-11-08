@@ -1,9 +1,6 @@
 /*
-  LVRA visual system
-  Idea: the work area is a Latvian school exercise book ("rūtiņu burtnīca"):
-  a light blue square grid with a red margin line. The result text sits on
-  ruled lines. Everything else stays quiet. System fonts only, so no
-  third-party font requests leave the user's browser.
+  websites visual part, idea of the text book where the 
+  image is located
 */
 
 :root {
@@ -292,6 +289,7 @@ mark.uncertain {
 
 @media (prefers-reduced-motion: reduce) {
   .ink-line { animation: none; background: var(--ink); }
+<<<<<<< HEAD
 }
 
 /* Terms window */
@@ -310,3 +308,6 @@ mark.uncertain {
 .devlines li { display: grid; grid-template-columns: 5.5rem 1fr; align-items: center; gap: 0.5rem; }
 .devlines img { max-width: 100%; height: auto; border: 1px solid var(--rule); background: #fff; }
 .devpanel pre { margin: 0.25rem 0; padding: 0.5rem; background: #f4f6fa; overflow-x: auto; font-size: 0.85rem; white-space: pre; }
+=======
+}
+>>>>>>> origin/web-app
