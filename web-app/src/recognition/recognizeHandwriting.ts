@@ -1,24 +1,31 @@
+import { devInspector } from './devInspector';
 import { AppError, toAppError } from './errors';
-import type { HandwritingRecognitionService, RecognitionResult } from './types';
+import { buildLabelsCsv, parseLabelsCsv } from './labelsCsv';
+import { mockSettings } from './mockSettings';
+import type { HandwritingRecognitionService, LineImage, RecognitionResult } from './types';
 
 export interface RecognizeHandwritingOptions {
   timeoutMs: number;
+  trainingConsent: boolean;
   /** Aborted when the user presses "Atcelt". */
   signal?: AbortSignal;
 }
 
 /**
- * The single entry point the UI uses: image in, recognised text out.
- * Adds the timeout and cancellation on top of whichever service is active,
- * so every backend gets identical behaviour.
+ * The single entry point the UI uses: line images in, recognised text out.
+ * Builds labels.csv, adds the timeout and cancellation on top of whichever
+ * service is active, and turns the returned CSV into text for the editor.
  */
 export async function recognizeHandwriting(
   service: HandwritingRecognitionService,
-  image: Blob | null,
-  { timeoutMs, signal }: RecognizeHandwritingOptions,
+  lines: LineImage[],
+  { timeoutMs, trainingConsent, signal }: RecognizeHandwritingOptions,
 ): Promise<RecognitionResult> {
-  if (!image) throw new AppError('NO_IMAGE');
+  if (lines.length === 0) throw new AppError('NO_TEXT_FOUND');
   if (signal?.aborted) throw new AppError('CANCELLED');
+
+  const labelsCsv = buildLabelsCsv(lines.map((l) => ({ filename: l.filename, text: '' })));
+  devInspector.recordRequest(mockSettings.backend, lines, labelsCsv, trainingConsent);
 
   const controller = new AbortController();
   let timedOut = false;
@@ -35,8 +42,12 @@ export async function recognizeHandwriting(
     }, timeoutMs);
   });
 
+  let csv: string;
   try {
-    return await Promise.race([service.recognize(image, { signal: controller.signal }), timeout]);
+    csv = await Promise.race([
+      service.recognize({ lines, labelsCsv, trainingConsent }, { signal: controller.signal }),
+      timeout,
+    ]);
   } catch (error) {
     if (timedOut) throw new AppError('TIMEOUT');
     throw toAppError(error);
@@ -44,4 +55,18 @@ export async function recognizeHandwriting(
     clearTimeout(timer);
     signal?.removeEventListener('abort', onUserAbort);
   }
+  devInspector.recordResponse(csv);
+
+  // Put the text back in the order of the line images (1.png = first line).
+  let rows;
+  try {
+    rows = parseLabelsCsv(csv);
+  } catch (error) {
+    throw new AppError('UNKNOWN', error instanceof Error ? error.message : 'Bad CSV');
+  }
+  const byName = new Map(rows.map((r) => [r.filename, r.text]));
+  const textLines = lines.map((l) => (byName.get(l.filename) ?? '').replace(/\r?\n/g, ' ').trim());
+  if (textLines.every((t) => t === '')) throw new AppError('NO_TEXT_FOUND', 'Empty result');
+
+  return { text: textLines.join('\n'), words: [] };
 }

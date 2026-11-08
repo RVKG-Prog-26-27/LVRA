@@ -1,12 +1,19 @@
 import { MockRecognitionService } from './mockRecognitionService';
+import { mockSettings } from './mockSettings';
+import { ServerRecognitionService } from './serverRecognitionService';
 import type { HandwritingRecognitionService } from './types';
 
 /**
  * The one place that decides which recognition backend the app uses.
- * Alpha version: the handwriting model is not connected yet, so the app
- * always uses the temporary mock. To connect the real model later, return
- * another implementation of HandwritingRecognitionService here.
+ * Normally the real AI server (config.recognition.defaultBackend). The
+ * developer panel can switch to the mock at any time, so the choice is read
+ * on every call.
  */
 export function createRecognitionService(): HandwritingRecognitionService {
-  return new MockRecognitionService();
+  const server = new ServerRecognitionService();
+  const mock = new MockRecognitionService();
+  return {
+    recognize: (request, options) =>
+      (mockSettings.backend === 'mock' ? mock : server).recognize(request, options),
+  };
 }

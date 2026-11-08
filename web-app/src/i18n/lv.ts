@@ -1,6 +1,8 @@
 /**
  * All user-facing texts in Latvian. Keeping them in one file makes wording
  * reviews easy and keeps technical terms out of components.
+ * The long texts of the terms of use and the privacy notice are in
+ * TermsDialog.tsx and PrivacyNotice.tsx.
  */
 import type { AppErrorCode } from '../recognition/errors';
 
@@ -13,7 +15,9 @@ export const lv = {
   chooseImage: 'Izvēlēties attēlu',
   takePhoto: 'Uzņemt foto',
   formatHint: 'Izmantojiet JPEG vai PNG attēlu.',
-  privacyShort: 'Attēls tiek izmantots tikai teksta atpazīšanai un pēc tam tiek dzēsts.',
+  privacyShortConsent:
+    'Rindu attēli tiks saglabāti AI modeļa apmācībai. Izvēli var mainīt sadaļā "Lietošanas noteikumi".',
+  privacyShortNoConsent: 'Rindu attēli tiek izmantoti tikai teksta atpazīšanai un pēc tam tiek dzēsti.',
   loadingImage: 'Atver attēlu…',
   selectionCancelled:
     'Attēls netika izvēlēts. Ja kamera vai attēlu galerija neatveras, pārlūka vai ierīces iestatījumos atļaujiet tai piekļuvi.',
@@ -44,12 +48,21 @@ export const lv = {
   errorTitle: 'Neizdevās atpazīt tekstu',
   retry: 'Mēģināt vēlreiz',
 
+  /** Shown while the real AI is in use. */
+  aiBanner: 'AI vēl mācās, tāpēc atpazītais teksts var būt neprecīzs. Pārbaudiet to un izlabojiet.',
+  /** Shown only when the developer panel switches to the mock service. */
   demoBanner:
-    'Demonstrācijas režīms: rokraksta atpazīšana vēl tiek izstrādāta, tāpēc tiek rādīts parauga teksts, nevis jūsu attēla saturs.',
+    'Demonstrācijas režīms: tiek rādīts parauga teksts, nevis jūsu attēla saturs.',
 
   footer: 'LVRA · Izstrādāja Slepie',
   privacyLink: 'Privātuma paziņojums',
+  termsLink: 'Lietošanas noteikumi',
   close: 'Aizvērt',
+
+  termsAcceptAll: 'Piekrītu visiem noteikumiem',
+  termsAcceptMandatory: 'Piekrītu tikai obligātajiem',
+  termsCurrentConsent: 'Jūsu pašreizējā izvēle: piekrītat visiem noteikumiem, arī AI modeļa apmācībai.',
+  termsCurrentNoConsent: 'Jūsu pašreizējā izvēle: piekrītat tikai obligātajiem noteikumiem.',
 
   errors: {
     NO_IMAGE: 'Vispirms izvēlieties vai nofotografējiet attēlu.',

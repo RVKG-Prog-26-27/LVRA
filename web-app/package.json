@@ -1,12 +1,14 @@
 {
   "name": "lvra-web-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "LVRA, Latvijas Valodas Rokraksta Atpazīšana. Web app for turning handwritten Latvian text into editable digital text.",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:phone": "vite --host"
+    "dev:phone": "vite --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^18.3.1",

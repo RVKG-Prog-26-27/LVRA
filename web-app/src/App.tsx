@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLvraApp } from './app/useLvraApp';
+import { loadConsent, saveConsent, type ConsentChoice } from './consent/consentStorage';
 import { DevPanel } from './components/DevPanel';
 import { ErrorMessage } from './components/ErrorMessage';
 import { RotateLeftIcon, RotateRightIcon } from './components/Icons';
@@ -8,12 +9,31 @@ import { ImagePreview } from './components/ImagePreview';
 import { PrivacyNotice } from './components/PrivacyNotice';
 import { ProcessingStatus } from './components/ProcessingStatus';
 import { ResultEditor } from './components/ResultEditor';
+import { TermsDialog } from './components/TermsDialog';
 import { lv } from './i18n/lv';
+import { devInspector } from './recognition/devInspector';
+import { mockSettings, type Backend } from './recognition/mockSettings';
 
 export default function App() {
-  const { state, selectFile, rotate, recognize, cancel, reset } = useLvraApp();
+  // The terms window opens by itself until the user has chosen (and again when the terms version changes).
+  const [consent, setConsent] = useState<ConsentChoice | null>(() => loadConsent());
+  const [termsOpen, setTermsOpen] = useState(consent === null);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const trainingConsent = consent?.trainingConsent ?? false;
+  const { state, selectFile, rotate, recognize, cancel, reset } = useLvraApp(trainingConsent);
+
   const showDevPanel = useMemo(() => new URLSearchParams(window.location.search).get('dev') === '1', []);
+  const [backend, setBackend] = useState<Backend>(mockSettings.backend);
+  useEffect(() => {
+    if (showDevPanel) devInspector.enable();
+  }, [showDevPanel]);
+
+  const chooseConsent = (value: boolean) => {
+    const choice = { trainingConsent: value };
+    saveConsent(choice);
+    setConsent(choice);
+    setTermsOpen(false);
+  };
 
   return (
     <div className="page">
@@ -26,7 +46,7 @@ export default function App() {
       </header>
 
       <p className="demo-banner" role="note">
-        {lv.demoBanner}
+        {backend === 'mock' ? lv.demoBanner : lv.aiBanner}
       </p>
 
       <main className="sheet">
@@ -34,7 +54,9 @@ export default function App() {
           <>
             <ImagePicker onFile={selectFile} />
             <p className="muted">{lv.formatHint}</p>
-            <p className="muted">{lv.privacyShort}</p>
+            {consent && (
+              <p className="muted">{consent.trainingConsent ? lv.privacyShortConsent : lv.privacyShortNoConsent}</p>
+            )}
             {state.error && <ErrorMessage code={state.error} />}
             {state.notice === 'cancelled' && (
               <p className="notice" role="status">
@@ -101,12 +123,25 @@ export default function App() {
 
       <footer className="footer">
         <span>{lv.footer}</span>
-        <button type="button" className="link" onClick={() => setPrivacyOpen(true)}>
-          {lv.privacyLink}
-        </button>
+        <span className="footer-links">
+          <button type="button" className="link" onClick={() => setTermsOpen(true)}>
+            {lv.termsLink}
+          </button>
+          <button type="button" className="link" onClick={() => setPrivacyOpen(true)}>
+            {lv.privacyLink}
+          </button>
+        </span>
       </footer>
 
-      {showDevPanel && <DevPanel />}
+      {showDevPanel && <DevPanel backend={backend} onBackendChange={setBackend} />}
+      <TermsDialog
+        open={termsOpen}
+        required={consent === null}
+        currentConsent={consent ? consent.trainingConsent : null}
+        onChoose={chooseConsent}
+        onClose={() => setTermsOpen(false)}
+        onOpenPrivacy={() => setPrivacyOpen(true)}
+      />
       <PrivacyNotice open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
     </div>
   );
