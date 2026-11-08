@@ -5,10 +5,13 @@ import tkinter as tk
 from tkinter import messagebox
 
 from PIL import Image, ImageTk
+from pathlib import Path
 
-FOLDER = r"C:\Users\r0mka\Desktop\LVRA\latvian_htr\data\real_dataset\images"
-FOLDER_CSV = r"C:\Users\r0mka\Desktop\LVRA\latvian_htr\data\real_dataset"
-CSV_PATH = os.path.join(FOLDER_CSV, "labels.csv")
+BASE = Path(__file__).resolve().parent                 # папка latvian_htr/
+FOLDER = BASE / "data" / "real_dataset" / "images"  
+FOLDER_CSV = BASE / "data" / "real_dataset"
+CSV_PATH = FOLDER_CSV / "labels.csv"                        # как у тебя сейчас
+
 PROGRESS_PATH = os.path.join(FOLDER, ".verify_progress")
 ORIG_DIR = os.path.join(FOLDER, "_originals")
 
