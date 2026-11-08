@@ -18,7 +18,7 @@ import torch
 
 from alphabet import NUM_CLASSES, decode_greedy
 from dataset import RealHTRDataset, SyntheticHTRDataset
-from model import CRNN
+from model import CRNN, load_model
 
 
 def edit_distance(a: str, b: str) -> int:
@@ -64,8 +64,8 @@ if __name__ == "__main__":
 
     random.seed(123)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = CRNN(num_classes=NUM_CLASSES).to(device)
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    # load_model sapratīs gan veco, gan jauno kontrolpunkta formātu (un x_stride).
+    model = load_model(args.checkpoint, NUM_CLASSES, device)
 
     if os.path.exists(os.path.join(args.real_data, "labels.csv")):
         evaluate(model, RealHTRDataset(args.real_data), device, title="REĀLIE paraugi")

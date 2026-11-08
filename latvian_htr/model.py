@@ -30,8 +30,15 @@ class CNNBackbone(nn.Module):
     W — attēla platums (katram attēlam atšķirīgs).
     Izvade: augstums ir sarucis līdz 1, bet "kanālu" skaits ir palielinājies līdz 512.
     """
-    def __init__(self):
+    def __init__(self, x_stride: int = 2):
         super().__init__()
+        if x_stride not in (2, 4):
+            raise ValueError("x_stride must be 2 or 4")
+        # x_stride=4: во 2-м блоке ширина тоже сжимается в 2 раза. Тогда все следующие (самые тяжёлые)
+        # свёртки и BiLSTM работают с вдвое меньшей шириной -> обучение примерно в 2 раза быстрее.
+        # Обучаемых весов это не меняет (MaxPool без весов), поэтому старые чекпоинты загружаются,
+        # но сеть надо дообучить. T = W // 4 - для строк до ~60 символов при высоте 64 этого хватает.
+        pool2 = nn.MaxPool2d(2, 2) if x_stride == 4 else nn.MaxPool2d((2, 1), (2, 1))
         # Šeit izmantoto slāņu skaidrojums:
         # - Conv2d - KONVOLŪCIJA aprēķina
         # izvades «kanālu» skaitu (64, 128, 256, 512...).
@@ -51,7 +58,7 @@ class CNNBackbone(nn.Module):
             # 1. bloks: 1 kanāls -> 64. Vienīgā vieta, kur saspiežam PLATUMU (2x): 64xW -> 32 x W/2
             nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d(2, 2),
             # 2. bloks: 64 -> 128, saspiežam tikai augstumu: -> 16 x W/2
-            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),
+            nn.Conv2d(64, 128, 3, 1, 1), nn.ReLU(inplace=True), pool2,
             # 3. bloks: 128 -> 256 -> 256, tikai augstums: -> 8 x W/2
             nn.Conv2d(128, 256, 3, 1, 1), nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, 3, 1, 1), nn.ReLU(inplace=True), nn.MaxPool2d((2, 1), (2, 1)),
@@ -107,9 +114,10 @@ turēties kopā. Tātad katra pozīcija zina, kas notika pirms tās un kas notik
 class CRNN(nn.Module):
     """Viss modelis: "acis" (CNN) + "izpratne" (BiLSTM)."""
 
-    def __init__(self, num_classes: int, lstm_hidden: int = 256):
+    def __init__(self, num_classes: int, lstm_hidden: int = 256, x_stride: int = 2):
         super().__init__()
-        self.cnn = CNNBackbone()  # acis
+        self.x_stride = x_stride
+        self.cnn = CNNBackbone(x_stride)  # acis
         # Galva: ievadē saņem 512 pazīmes (tik izvades kanālu ir CNN),
         # izvadē - num_classes novērtējumus (pēc alfabēta simbolu skaita, ieskaitot blank).
         self.rnn = BiLSTMHead(in_dim=512, hidden=lstm_hidden, num_classes=num_classes)
@@ -128,10 +136,43 @@ class CRNN(nn.Module):
         logits = self.rnn(feats)              # [T, B, num_classes]  - simbolu novērtējumi
         # log_softmax pārvērš novērtējumus par varbūtību logaritmiem (summa ir 100% pa
         # simboliem katrā solī). Tieši šādā formā tos sagaida CTC zaudējumu funkcija.
-        return logits.log_softmax(dim=2)
+        # .float(): при обучении в mixed precision softmax и CTC всё равно считаем в float32 (точность).
+        return logits.float().log_softmax(dim=2)
 
     def output_length(self, input_width: int) -> int:
         """Cik soļus T tiks iegūts CNN izvadē attēlam ar noteiktu platumu (nepieciešams CTC)?
-        Platums tiek saspiests tikai vienu reizi (pirmais MaxPool(2,2)) -> T = W // 2.
+        x_stride=2: platums tiek saspiests vienu reizi (pirmais MaxPool(2,2)) -> T = W // 2.
+        x_stride=4: divreiz -> T = (W // 2) // 2.
         Ja maini CNN (pooling/kernel), JĀLABO ŠĪ FORMULA, citādi CTC redzēs nepareizu garumu."""
-        return max(input_width // 2, 1)
+        t = input_width // 2
+        if self.x_stride == 4:
+            t //= 2
+        return max(t, 1)
+
+    def output_lengths(self, widths: torch.Tensor) -> torch.Tensor:
+        """То же самое сразу для всего батча (widths - long тензор [B])."""
+        t = widths // 2
+        if self.x_stride == 4:
+            t = t // 2
+        return t.clamp(min=1)
+
+
+def save_checkpoint(model: CRNN, path: str, step: int | None = None):
+    """Чекпоинт = веса + настройки архитектуры (x_stride), чтобы infer/evaluate собрали такую же сеть."""
+    torch.save({"model": model.state_dict(), "x_stride": model.x_stride, "step": step}, path)
+
+
+def load_checkpoint(path: str, map_location="cpu") -> tuple[dict, int]:
+    """Читает и новый формат (dict с 'model'), и старый (просто state_dict). Возвращает (веса, x_stride)."""
+    ckpt = torch.load(path, map_location=map_location)
+    if isinstance(ckpt, dict) and "model" in ckpt:
+        return ckpt["model"], ckpt.get("x_stride", 2)
+    return ckpt, 2
+
+
+def load_model(path: str, num_classes: int, device) -> CRNN:
+    """Создаёт CRNN с той же архитектурой, что в чекпоинте, и загружает веса."""
+    state, x_stride = load_checkpoint(path, device)
+    model = CRNN(num_classes=num_classes, x_stride=x_stride).to(device)
+    model.load_state_dict(state)
+    return model

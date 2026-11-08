@@ -30,3 +30,14 @@ obj/
 Thumbs.db
 *.log
 *.tmp
+
+# Игнорируем чекпоинты моделей
+latvian_htr/checkpoints/
+latvian_htr/checkpoints_v2/
+
+# Игнорируем тяжелые датасеты и папки с картинками/семплами
+latvian_htr/data/real_dataset/images/
+latvian_htr/data/synth_100k/
+latvian_htr/data/synth_30k/
+latvian_htr/samples/
+.vscode/
