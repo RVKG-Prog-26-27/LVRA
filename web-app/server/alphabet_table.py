@@ -6,7 +6,7 @@ fit on the free PythonAnywhere plan. This file has the same table and the
 same decoding, without PyTorch.
 
 KEEP IN SYNC: if the AI side changes LATVIAN_LETTERS, BASE_LATIN, DIGITS or
-PUNCT in latvian_htr/alphabet.py, make the same change here. Otherwise the
+PUNCT or STRIKE_MARK in latvian_htr/alphabet.py, make the same change here. Otherwise the
 numbers no longer mean the same letters. If the number of characters does
 not match the model file, the server refuses to start recognising and
 writes the reason to the error log.
@@ -22,7 +22,7 @@ DIGITS = "0123456789"
 PUNCT = (
     " .,!?-:;()\"'/•"                        # pamata pieturzīmes
     + "\u201e\u201c\u201d\u2018\u2019"       # „ " " ' ' (latviešu/izliektas pēdiņas)
-    + "\u2013\u2014"                         # – – (defise en un em)
+    + "\u2013\u2014"                         # defise en un em
     + "[]{}"                                 # iekavas 
     + "«»"                                   # eglītes
     + "*_+=<>@#%&^~|\\"                      # simboli
@@ -31,7 +31,10 @@ PUNCT = (
     + "€$"                                   # valūta 
 )
 
-CHARS = sorted(set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + PUNCT))
+# The model writes this mark in place of one crossed-out word (same as alphabet.STRIKE_MARK).
+STRIKE_MARK = "\u00a4"
+
+CHARS = sorted(set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + PUNCT + STRIKE_MARK))
 BLANK = "<blank>"
 ALPHABET = [BLANK] + CHARS
 IDX_TO_CHAR = {i: c for i, c in enumerate(ALPHABET)}
@@ -102,3 +105,9 @@ def decode_beam_search(log_probs, beam_width=5, prune=12.0):
 
     best_prefix = max(beams, key=lambda prefix: _log_add(beams[prefix][0], beams[prefix][1]))
     return "".join(IDX_TO_CHAR[i] for i in best_prefix)
+
+
+def strip_struck(text):
+    """Same as alphabet.strip_struck: removes the crossed-out word marks and tidies the spaces.
+    "Ekonomika \u00a4 tirgus" -> "Ekonomika tirgus" """
+    return " ".join(text.replace(STRIKE_MARK, " ").split())

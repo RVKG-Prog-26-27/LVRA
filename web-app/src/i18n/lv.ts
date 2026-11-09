@@ -12,8 +12,12 @@ export const lv = {
   intro:
     'Nofotografējiet vai izvēlieties attēlu ar rokrakstu latviešu valodā, un LVRA to pārvērtīs tekstā, ko varat labot un kopēt.',
 
-  chooseImage: 'Izvēlēties attēlu',
+  chooseImage: 'Izvēlēties attēlus',
   takePhoto: 'Uzņemt foto',
+  takeAnotherPhoto: 'Uzņemt vēl foto',
+  addFromGallery: 'Pievienot no galerijas',
+  remove: 'Noņemt',
+  sizeLimit: 'Kopējais attēlu izmērs nedrīkst pārsniegt 50 MB. Šo attēlu nevarēja pievienot.',
   formatHint: 'Izmantojiet JPEG vai PNG attēlu.',
   privacyShortConsent:
     'Rindu attēli tiks saglabāti AI modeļa apmācībai. Izvēli var mainīt sadaļā "Lietošanas noteikumi".',
@@ -23,6 +27,8 @@ export const lv = {
     'Attēls netika izvēlēts. Ja kamera vai attēlu galerija neatveras, pārlūka vai ierīces iestatījumos atļaujiet tai piekļuvi.',
 
   previewTitle: 'Vai šis ir pareizais attēls?',
+  previewTitleMany: 'Vai šie ir pareizie attēli?',
+  photoLabel: (n: number) => `${n}. attēls`,
   previewHint: 'Ja teksts ir šķībs vai apgriezts, pagrieziet attēlu.',
   previewAlt: 'Izvēlētā attēla priekšskatījums',
   rotateLeft: 'Pagriezt pa kreisi',
@@ -31,7 +37,8 @@ export const lv = {
   recognize: 'Atpazīt tekstu',
 
   processing: 'Apstrādā attēlu…',
-  processingHint: 'Tas var aizņemt līdz vienai minūtei.',
+  processingMany: (n: number, total: number) => `Apstrādā ${n}. attēlu no ${total}…`,
+  processingHint: 'Katrs attēls var aizņemt līdz vienai minūtei.',
   cancel: 'Atcelt',
 
   resultTitle: 'Atpazītais teksts',
@@ -40,6 +47,7 @@ export const lv = {
     'Iekrāsotie vārdi, iespējams, ir atpazīti neprecīzi. Kad vārdu izlabojat, iekrāsojums pazūd.',
   editorLabel: 'Atpazītais teksts, ko var labot',
   copy: 'Kopēt tekstu',
+  copyAll: 'Kopēt visu',
   copied: 'Teksts nokopēts!',
   copyFailed: 'Neizdevās nokopēt tekstu. Iezīmējiet to un nokopējiet manuāli.',
   emptyText: 'Teksta lauks ir tukšs.',

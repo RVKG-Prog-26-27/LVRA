@@ -3,12 +3,11 @@ import { useLvraApp } from './app/useLvraApp';
 import { loadConsent, saveConsent, type ConsentChoice } from './consent/consentStorage';
 import { DevPanel } from './components/DevPanel';
 import { ErrorMessage } from './components/ErrorMessage';
-import { RotateLeftIcon, RotateRightIcon } from './components/Icons';
 import { ImagePicker } from './components/ImagePicker';
-import { ImagePreview } from './components/ImagePreview';
+import { PhotoList } from './components/PhotoList';
 import { PrivacyNotice } from './components/PrivacyNotice';
 import { ProcessingStatus } from './components/ProcessingStatus';
-import { ResultEditor } from './components/ResultEditor';
+import { ResultTabs } from './components/ResultTabs';
 import { TermsDialog } from './components/TermsDialog';
 import { lv } from './i18n/lv';
 import { devInspector } from './recognition/devInspector';
@@ -20,7 +19,7 @@ export default function App() {
   const [termsOpen, setTermsOpen] = useState(consent === null);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const trainingConsent = consent?.trainingConsent ?? false;
-  const { state, selectFile, rotate, recognize, cancel, reset } = useLvraApp(trainingConsent);
+  const { state, selectFiles, rotate, remove, recognize, cancel, reset } = useLvraApp(trainingConsent);
 
   const showDevPanel = useMemo(() => new URLSearchParams(window.location.search).get('dev') === '1', []);
   const [backend, setBackend] = useState<Backend>(mockSettings.backend);
@@ -52,7 +51,7 @@ export default function App() {
       <main className="sheet">
         {state.step === 'pick' && (
           <>
-            <ImagePicker onFile={selectFile} />
+            <ImagePicker onFiles={selectFiles} />
             <p className="muted">{lv.formatHint}</p>
             {consent && (
               <p className="muted">{consent.trainingConsent ? lv.privacyShortConsent : lv.privacyShortNoConsent}</p>
@@ -63,8 +62,26 @@ export default function App() {
                 {lv.selectionCancelled}
               </p>
             )}
+            {state.notice === 'sizeLimit' && (
+              <p className="notice" role="status">
+                {lv.sizeLimit}
+              </p>
+            )}
           </>
         )}
+
+        {(state.step === 'loading' || state.step === 'preview' || state.step === 'recognizing') &&
+          state.items.length > 0 && (
+            <>
+              <h2>{state.items.length > 1 ? lv.previewTitleMany : lv.previewTitle}</h2>
+              <PhotoList
+                items={state.items}
+                busy={state.step !== 'preview'}
+                onRotate={rotate}
+                onRemove={remove}
+              />
+            </>
+          )}
 
         {state.step === 'loading' && (
           <p className="muted" role="status" aria-live="polite">
@@ -72,53 +89,44 @@ export default function App() {
           </p>
         )}
 
-        {(state.step === 'preview' || state.step === 'recognizing') && (
+        {state.step === 'recognizing' && (
+          <ProcessingStatus onCancel={cancel} current={state.current + 1} total={state.items.length} />
+        )}
+
+        {state.step === 'preview' && (
           <>
-            <h2>{lv.previewTitle}</h2>
-            <div className="preview-wrap">
-              <ImagePreview image={state.image} rotation={state.rotation} busy={state.step === 'recognizing'} />
-              {state.step === 'recognizing' && <ProcessingStatus onCancel={cancel} />}
-            </div>
+            <p className="muted">{lv.previewHint}</p>
+            {state.loadError && <ErrorMessage code={state.loadError} />}
+            {state.notice === 'sizeLimit' && (
+              <p className="notice" role="status">
+                {lv.sizeLimit}
+              </p>
+            )}
+            <ImagePicker onFiles={selectFiles} variant="add" />
 
-            {state.step === 'preview' && (
-              <>
-                <p className="muted">{lv.previewHint}</p>
-                <div className="actions">
-                  <button type="button" className="btn btn-quiet" onClick={() => rotate(-90)}>
-                    <RotateLeftIcon />
-                    {lv.rotateLeft}
-                  </button>
-                  <button type="button" className="btn btn-quiet" onClick={() => rotate(90)}>
-                    <RotateRightIcon />
-                    {lv.rotateRight}
-                  </button>
-                </div>
-
-                {state.error ? (
-                  <ErrorMessage code={state.error} withTitle>
-                    <button type="button" className="btn btn-primary" onClick={recognize}>
-                      {lv.retry}
-                    </button>
-                    <button type="button" className="btn btn-quiet" onClick={reset}>
-                      {lv.chooseAnother}
-                    </button>
-                  </ErrorMessage>
-                ) : (
-                  <div className="actions actions-main">
-                    <button type="button" className="btn btn-primary" onClick={recognize}>
-                      {lv.recognize}
-                    </button>
-                    <button type="button" className="btn btn-quiet" onClick={reset}>
-                      {lv.chooseAnother}
-                    </button>
-                  </div>
-                )}
-              </>
+            {state.error ? (
+              <ErrorMessage code={state.error} withTitle>
+                <button type="button" className="btn btn-primary" onClick={recognize}>
+                  {lv.retry}
+                </button>
+                <button type="button" className="btn btn-quiet" onClick={reset}>
+                  {lv.chooseAnother}
+                </button>
+              </ErrorMessage>
+            ) : (
+              <div className="actions actions-main">
+                <button type="button" className="btn btn-primary" onClick={recognize}>
+                  {lv.recognize}
+                </button>
+                <button type="button" className="btn btn-quiet" onClick={reset}>
+                  {lv.chooseAnother}
+                </button>
+              </div>
             )}
           </>
         )}
 
-        {state.step === 'result' && <ResultEditor segments={state.segments} onStartOver={reset} />}
+        {state.step === 'result' && <ResultTabs results={state.results} onStartOver={reset} />}
       </main>
 
       <footer className="footer">

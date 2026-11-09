@@ -5,8 +5,8 @@
  *
  * - Switch between the real AI server and the mock.
  * - Mock scenarios, simulated delay, short timeout.
- * - The last request: every line PNG the browser cut out, the labels.csv
- *   that was sent and the labels.csv that came back.
+ * - The last recognition, per photo: every line PNG the browser cut out,
+ *   the labels.csv that was sent and the labels.csv that came back.
  */
 import { useState, useSyncExternalStore } from 'react';
 import { devInspector } from '../recognition/devInspector';
@@ -19,7 +19,7 @@ interface Props {
 
 export function DevPanel({ backend, onBackendChange }: Props) {
   const [, forceRender] = useState(0);
-  const inspection = useSyncExternalStore(devInspector.subscribe, devInspector.get);
+  const batch = useSyncExternalStore(devInspector.subscribe, devInspector.get);
 
   const update = (change: Partial<typeof mockSettings>) => {
     Object.assign(mockSettings, change);
@@ -87,28 +87,31 @@ export function DevPanel({ backend, onBackendChange }: Props) {
         />
       </label>
 
-      <h3>Last request</h3>
-      {!inspection ? (
-        <p>Nothing sent yet. Choose an image and press "Atpazīt tekstu".</p>
+      <h3>Last recognition</h3>
+      {batch.length === 0 ? (
+        <p>Nothing sent yet. Choose photos and press "Atpazīt tekstu".</p>
       ) : (
-        <>
-          <p>
-            Backend: <strong>{inspection.backend}</strong> · lines: <strong>{inspection.lines.length}</strong> ·
-            training_consent: <strong>{String(inspection.trainingConsent)}</strong>
-          </p>
-          <ol className="devlines">
-            {inspection.lines.map((line) => (
-              <li key={line.filename}>
-                <span>{line.filename}</span>
-                <img src={line.url} alt={line.filename} />
-              </li>
-            ))}
-          </ol>
-          <p>labels.csv sent:</p>
-          <pre>{inspection.sentCsv}</pre>
-          <p>labels.csv received:</p>
-          <pre>{inspection.receivedCsv ?? '(waiting or failed)'}</pre>
-        </>
+        batch.map((inspection, index) => (
+          <div key={index} className="devbatch">
+            <p>
+              <strong>Photo {index + 1}</strong> · backend: <strong>{inspection.backend}</strong> · lines:{' '}
+              <strong>{inspection.lines.length}</strong> · training_consent:{' '}
+              <strong>{String(inspection.trainingConsent)}</strong>
+            </p>
+            <ol className="devlines">
+              {inspection.lines.map((line) => (
+                <li key={line.filename}>
+                  <span>{line.filename}</span>
+                  <img src={line.url} alt={line.filename} />
+                </li>
+              ))}
+            </ol>
+            <p>labels.csv sent:</p>
+            <pre>{inspection.sentCsv}</pre>
+            <p>labels.csv received:</p>
+            <pre>{inspection.receivedCsv ?? '(waiting or failed)'}</pre>
+          </div>
+        ))
       )}
     </details>
   );
