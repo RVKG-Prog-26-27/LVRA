@@ -35,14 +35,14 @@ export function PrivacyNotice({ open, onClose }: Props) {
 
       <h3>Kādi dati tiek apstrādāti</h3>
       <p>
-        Attēls, ko jūs izvēlaties vai nofotografējat, no tā izgrieztie teksta rindu attēli un atpazītais teksts. Mēs
+        Attēli, ko jūs izvēlaties vai nofotografējat, no tiem izgrieztie teksta rindu attēli un atpazītais teksts. Mēs
         neprasām vārdu, e-pastu vai citu informāciju par jums. Ja attēlā ir rakstīti personas dati, piemēram, vārdi vai
         adreses, arī tie tiek apstrādāti.
       </p>
 
       <h3>Kā notiek apstrāde</h3>
       <p>
-        Jūsu ierīcē attēls tiek samazināts un sadalīts atsevišķos teksta rindu attēlos. Viss attēls no jūsu ierīces
+        Jūsu ierīcē katrs attēls tiek samazināts un sadalīts atsevišķos teksta rindu attēlos. Viss attēls no jūsu ierīces
         netiek nosūtīts. Rindu attēli kopā ar tabulu (CSV) tiek nosūtīti atpazīšanas serverim Eiropas Savienībā.
         Serveris atgriež atpazīto tekstu, un lietotne to parāda redaktorā. Jūsu labojumi redaktorā netiek nosūtīti.
       </p>

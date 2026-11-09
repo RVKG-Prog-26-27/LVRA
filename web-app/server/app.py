@@ -10,7 +10,8 @@ POST /api/recognize, multipart/form-data:
   images            one PNG per line, named 0001.png, 0002.png, ... (top line first)
   training_consent  "true" or "false"
 
-Answer: 200 with text/csv (labels.csv, text column filled in), or an error
+Answer: 200 with text/csv (labels.csv, text column filled in, crossed-out
+word marks removed), or an error
 as JSON {"error": "<code>"} with a code the web app already knows:
 INVALID_IMAGE, NO_TEXT_FOUND, SERVICE_UNAVAILABLE.
 
@@ -26,7 +27,7 @@ Privacy (must match the privacy notice):
 
 Settings (environment variables, all optional):
   LVRA_HTR_DIR      folder of the AI code, default: ../../latvian_htr from this file
-  LVRA_CHECKPOINT   model weights, default: checkpoints_v2/crnn_step30000.pt in LVRA_HTR_DIR
+  LVRA_CHECKPOINT   model weights, default: checkpoints_v2/crnn_best.pt in LVRA_HTR_DIR
   LVRA_DATA_DIR     where training data is kept, default: ~/lvra_data/real_dataset
                     (on PythonAnywhere: /home/cloudy1337/lvra_data/real_dataset)
 """
@@ -41,6 +42,7 @@ import time
 from flask import Flask, Request, jsonify, request, send_from_directory
 from PIL import Image
 
+from alphabet_table import strip_struck
 from htr_numpy import Recognizer
 
 try:
@@ -52,7 +54,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_APP_DIR = os.path.dirname(HERE)
 DIST_DIR = os.path.join(WEB_APP_DIR, "dist")
 HTR_DIR = os.path.abspath(os.environ.get("LVRA_HTR_DIR", os.path.join(WEB_APP_DIR, "..", "latvian_htr")))
-CHECKPOINT = os.environ.get("LVRA_CHECKPOINT", os.path.join(HTR_DIR, "checkpoints_v2", "crnn_step30000.pt"))
+CHECKPOINT = os.environ.get("LVRA_CHECKPOINT", os.path.join(HTR_DIR, "checkpoints_v2", "crnn_best.pt"))
 DATA_DIR = os.path.expanduser(os.environ.get("LVRA_DATA_DIR", "~/lvra_data/real_dataset"))
 
 MAX_LINES = 100  # same as config.lines.maxLines in the web app
@@ -180,14 +182,16 @@ def recognize():
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(["filename", "text"])
     for name in filenames:
-        writer.writerow([name, texts[name]])
+        # The user sees the text without the crossed-out word marks.
+        writer.writerow([name, strip_struck(texts[name])])
     return app.response_class(out.getvalue(), mimetype="text/csv; charset=utf-8")
 
 
 def save_for_training(filenames, images, texts):
     """
     Adds the lines to DATA_DIR in latvian_htr's format:
-      DATA_DIR/labels.csv   filename,text   (text = the AI's guess, the team corrects it)
+      DATA_DIR/labels.csv   filename,text   (text = the AI's guess, the team corrects it;
+                                             crossed-out word marks are kept here)
       DATA_DIR/images/<YYYYMMDD_HHMMSS>_<random>_0001.png
     """
     images_dir = os.path.join(DATA_DIR, "images")

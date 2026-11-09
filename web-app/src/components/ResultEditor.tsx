@@ -15,12 +15,16 @@ import { CopyIcon } from './Icons';
 
 interface Props {
   segments: TextSegment[];
-  onStartOver: () => void;
+  /** Accessible name of the editor, e.g. "Atpazītais teksts, ko var labot, 2. attēls". */
+  label: string;
+  /** Called with the current text whenever it changes, so "Kopēt visu" can use edited text. */
+  onTextChange: (text: string) => void;
 }
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
-export function ResultEditor({ segments, onStartOver }: Props) {
+/** The editable text of one photo with its own "Kopēt tekstu" button. */
+export function ResultEditor({ segments, label, onTextChange }: Props) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(false);
   const [hasUncertain, setHasUncertain] = useState(segments.some((s) => s.uncertain));
@@ -32,8 +36,10 @@ export function ResultEditor({ segments, onStartOver }: Props) {
     if (!editor) return;
     renderSegments(editor, segments);
     setHasUncertain(segments.some((s) => s.uncertain));
-    setIsEmpty(extractText(editor).trim() === '');
-  }, [segments]);
+    const text = extractText(editor);
+    setIsEmpty(text.trim() === '');
+    onTextChange(text);
+  }, [segments, onTextChange]);
 
   const syncAfterEdit = useCallback(() => {
     const editor = editorRef.current;
@@ -42,9 +48,11 @@ export function ResultEditor({ segments, onStartOver }: Props) {
     if (unwrapEditedMarks(editor) && caret !== null) setCaretOffset(editor, caret);
     ensureSentinel(editor);
     setHasUncertain(editor.querySelector('mark.uncertain') !== null);
-    setIsEmpty(extractText(editor).trim() === '');
+    const text = extractText(editor);
+    setIsEmpty(text.trim() === '');
+    onTextChange(text);
     setCopyState('idle');
-  }, []);
+  }, [onTextChange]);
 
   // Keep the content plain text: Enter inserts "\n", formatting and dropped HTML are blocked.
   useEffect(() => {
@@ -87,9 +95,7 @@ export function ResultEditor({ segments, onStartOver }: Props) {
   };
 
   return (
-    <section className="result" aria-labelledby="result-title">
-      <h2 id="result-title">{lv.resultTitle}</h2>
-      <p className="muted">{lv.resultHint}</p>
+    <>
       {hasUncertain && (
         <p className="legend">
           <mark className="uncertain legend-swatch">vārds</mark>
@@ -104,7 +110,7 @@ export function ResultEditor({ segments, onStartOver }: Props) {
         suppressContentEditableWarning
         role="textbox"
         aria-multiline="true"
-        aria-label={lv.editorLabel}
+        aria-label={label}
         spellCheck={false}
         lang="lv"
         onInput={syncAfterEdit}
@@ -116,13 +122,10 @@ export function ResultEditor({ segments, onStartOver }: Props) {
           <CopyIcon />
           {lv.copy}
         </button>
-        <button type="button" className="btn btn-quiet" onClick={onStartOver}>
-          {lv.startOver}
-        </button>
       </div>
       <p className={`toast${copyState === 'failed' ? ' toast-error' : ''}`} role="status" aria-live="polite">
         {copyState === 'copied' ? lv.copied : copyState === 'failed' ? lv.copyFailed : ''}
       </p>
-    </section>
+    </>
   );
 }

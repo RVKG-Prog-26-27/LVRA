@@ -5,6 +5,8 @@ import random
 import shutil
 import threading
 import time
+import subprocess
+import re
 import tkinter as tk
 from tkinter import messagebox
 
@@ -49,9 +51,9 @@ MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS   # everything in the prikol folder with th
 
 RESAMPLE = getattr(Image, "Resampling", Image).LANCZOS
 RESAMPLE_FAST = getattr(Image, "Resampling", Image).BILINEAR
-# Zoom settings
-ZOOM_STEP = 1.2  # 20% zoom per step
-ZOOM_MAX = 10.0  # Maximum zoom: 10x
+
+# Git commit settings
+REAL_DATA_VERSION_START = 8  # The current real-data commit number
 
 
 def read_rows(path):
@@ -406,6 +408,9 @@ class App:
             "Drag the dividers between the panels to resize them",
             ("Segoe UI", 9), MUTED, 6, width=58)
         self.hints.pack(fill="x", pady=(6, 0))
+        make_button(notes, "Commit changes to Git", self.commit_to_git).pack(
+            fill="x", pady=(8, 0)
+        )
 
         # big field: works like the small slots (stretches to the whole field)
         self.big_slot = MediaSlot(bottom, self.scan_prikol, self.save_settings, mode=BIG_MODE)
@@ -778,6 +783,108 @@ class App:
         self.reset_view()
         self.show_image()
         self.set_status("Original restored")
+
+
+    # ---------- Git commit ----------
+    def commit_to_git(self):
+        """Save the current labels and image changes, then commit them to Git."""
+        self.commit_text()
+        if self.dirty:
+            try:
+                self.save()
+            except Exception as ex:
+                messagebox.showerror("Git commit", f"Could not save labels.csv:\n{ex}")
+                return
+
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=str(BASE),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            repo_root = Path(result.stdout.strip()).resolve()
+
+            # Stage labels.csv and dataset images, but never temporary UI files
+            # or the _originals crop-backup directory.
+            files_to_stage = [CSV_PATH.resolve()]
+            if FOLDER.exists():
+                for path in FOLDER.rglob("*"):
+                    if not path.is_file():
+                        continue
+                    relative_parts = path.relative_to(FOLDER).parts
+                    if "_originals" in relative_parts:
+                        continue
+                    if path.suffix.lower() in IMAGE_EXTS:
+                        files_to_stage.append(path.resolve())
+
+            relative_paths = []
+            for path in files_to_stage:
+                try:
+                    relative_paths.append(str(path.relative_to(repo_root)))
+                except ValueError:
+                    raise RuntimeError(f"File is outside the Git repository: {path}")
+
+            subprocess.run(
+                ["git", "add", "--", *relative_paths],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            changed = subprocess.run(
+                ["git", "diff", "--cached", "--quiet"],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if changed.returncode == 0:
+                self.set_status("Git: no staged changes to commit")
+                return
+            if changed.returncode != 1:
+                raise RuntimeError(changed.stderr or "Could not check staged changes")
+
+            # Find the most recent real-data commit number and increment it.
+            history = subprocess.run(
+                ["git", "log", "--all", "--format=%s", "-100"],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            version = REAL_DATA_VERSION_START
+            for subject in history.stdout.splitlines():
+                match = re.match(r"^real data 0\.(\d+)(?:\s|$)", subject, re.IGNORECASE)
+                if match:
+                    version = max(version, int(match.group(1)))
+                    break
+            version += 1
+
+            current_file = self.rows[self.idx][0]
+            commit_message = f"real data 0.{version} checked till {current_file}"
+            commit = subprocess.run(
+                ["git", "commit", "-m", commit_message],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if commit.returncode != 0:
+                details = (commit.stderr or commit.stdout).strip()
+                raise RuntimeError(details or "Git commit failed")
+
+            self.set_status(f"Committed: {commit_message}")
+        except FileNotFoundError:
+            messagebox.showerror(
+                "Git commit",
+                "Git was not found. Install Git and make sure it is available in PATH."
+            )
+        except subprocess.CalledProcessError as ex:
+            details = (ex.stderr or ex.stdout or str(ex)).strip()
+            messagebox.showerror("Git commit", details)
+        except Exception as ex:
+            messagebox.showerror("Git commit", str(ex))
 
     # ---------- key handlers ----------
     def on_save_key(self, e):

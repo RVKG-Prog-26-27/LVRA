@@ -33,6 +33,11 @@ export const config = {
     maxShortSide: 1080,
   },
 
+  photos: {
+    /** Total size of all selected photos together (the original files). */
+    maxTotalBytes: 50 * 1024 * 1024,
+  },
+
   lines: {
     /** More lines than this in one photo is treated as unreadable (protects the server). */
     maxLines: 100,

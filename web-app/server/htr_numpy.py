@@ -12,7 +12,8 @@ alphabet_table.py, a copy without PyTorch.
 
 KEEP IN SYNC with latvian_htr:
   model.py          the layers in forward() below, including the pooling sizes
-                    (they are not stored in the checkpoint)
+                    (they are not stored in the checkpoint, except x_stride,
+                    which save_checkpoint() puts into the checkpoint package)
   synthetic_data.py TARGET_HEIGHT
   dataset.py / infer.py  how a line image is prepared (prepare_line below)
   alphabet.py       alphabet_table.py
@@ -57,11 +58,13 @@ def _rebuild_tensor(storage, offset, size, stride, *_):
     return np.array(view)
 
 
-def load_state_dict(path):
+def load_checkpoint(path):
     """
-    Reads a PyTorch checkpoint (a state_dict saved with torch.save) without
-    PyTorch. Only plain tensors are allowed; any other object in the file is
-    refused, so a tampered checkpoint cannot run code.
+    Reads a PyTorch checkpoint without PyTorch and returns (weights, x_stride),
+    like load_checkpoint() in latvian_htr/model.py. A checkpoint that holds
+    only the weights (older format) gets x_stride 2.
+    Only plain tensors, numbers and dictionaries are allowed; any other object
+    in the file is refused, so a tampered checkpoint cannot run code.
     """
     archive = zipfile.ZipFile(path)
     pkl_name = next(n for n in archive.namelist() if n.endswith("data.pkl"))
@@ -85,8 +88,48 @@ def load_state_dict(path):
             return np.frombuffer(archive.read(f"{prefix}data/{key}"), dtype=dtype)
 
     with archive.open(pkl_name) as f:
-        state = Unpickler(f).load()
-    return {k: np.asarray(v, dtype=np.float32) if v.dtype != np.int64 else v for k, v in state.items()}
+        content = Unpickler(f).load()
+    state = _find_weights(content)
+    if state is None:
+        raise RuntimeError(f"No model weights (rnn.fc.weight) found in {path}")
+    weights = {
+        k: (v if v.dtype == np.int64 else np.asarray(v, dtype=np.float32))
+        for k, v in state.items()
+        if isinstance(v, np.ndarray)
+    }
+    x_stride = content.get("x_stride", 2) if isinstance(content, dict) and "rnn.fc.weight" not in content else 2
+    if x_stride not in (2, 4):
+        raise RuntimeError(f"Checkpoint has x_stride={x_stride!r}; the server knows only 2 and 4 (see latvian_htr/model.py)")
+    return weights, int(x_stride)
+
+
+_WEIGHT_KEY = "rnn.fc.weight"
+
+
+def _find_weights(obj):
+    """
+    Finds the model weights in a checkpoint.
+
+    A checkpoint can be saved in two ways:
+      torch.save(model.state_dict(), ...)          the file is the weights
+      torch.save({"model": model.state_dict(),     the weights are inside a
+                  "step": ..., "optimizer": ...})   package with other things
+    The package keys differ between projects ("model", "state_dict",
+    "model_state_dict", ...), so the weights are found by looking for the
+    dictionary that holds the layer "rnn.fc.weight". Prefixes that PyTorch
+    adds in some setups ("module.", "_orig_mod.") are removed.
+    """
+    if not isinstance(obj, dict):
+        return None
+    for key in obj:
+        if isinstance(key, str) and key.endswith(_WEIGHT_KEY):
+            prefix = key[: -len(_WEIGHT_KEY)]
+            return {k[len(prefix):]: v for k, v in obj.items() if isinstance(k, str) and k.startswith(prefix)}
+    for value in obj.values():
+        found = _find_weights(value)
+        if found is not None:
+            return found
+    return None
 
 
 # ---------------------------------------------------------------- layers
@@ -166,19 +209,20 @@ def check_architecture(sd):
             )
 
 
-def forward(sd, image):
+def forward(sd, image, x_stride=2):
     """
     image: float32 [64, W], ink close to 1, paper close to 0 (as in
     latvian_htr/dataset.py image_to_tensor). Returns log probabilities [T, num_classes].
     Layer numbers are the indexes inside CNNBackbone.net in latvian_htr/model.py:
-      0 conv 3x3, 2 maxpool 2x2, 3 conv, 5 maxpool (2,1), 6 conv, 8 conv, 10 maxpool (2,1),
-      11 conv + 12 batchnorm, 14 conv + 15 batchnorm, 17 maxpool (2,1), 18 conv (4,1) no padding.
-    Height 64 -> 32 -> 16 -> 8 -> 4 -> 1, width W -> W/2.
+      0 conv 3x3, 2 maxpool 2x2, 3 conv, 5 maxpool (2,1) or 2x2 when x_stride is 4,
+      6 conv, 8 conv, 10 maxpool (2,1), 11 conv + 12 batchnorm, 14 conv + 15 batchnorm,
+      17 maxpool (2,1), 18 conv (4,1) no padding.
+    Height 64 -> 32 -> 16 -> 8 -> 4 -> 1, width W -> W/2 (x_stride 2) or W/4 (x_stride 4).
     """
     p = "cnn.net."
     x = image[None].astype(np.float32)
     x = _maxpool(_relu(_conv2d(x, sd[p + "0.weight"], sd[p + "0.bias"], 1)), 2, 2)
-    x = _maxpool(_relu(_conv2d(x, sd[p + "3.weight"], sd[p + "3.bias"], 1)), 2, 1)
+    x = _maxpool(_relu(_conv2d(x, sd[p + "3.weight"], sd[p + "3.bias"], 1)), 2, 2 if x_stride == 4 else 1)
     x = _relu(_conv2d(x, sd[p + "6.weight"], sd[p + "6.bias"], 1))
     x = _maxpool(_relu(_conv2d(x, sd[p + "8.weight"], sd[p + "8.bias"], 1)), 2, 1)
     x = _relu(_batchnorm(_conv2d(x, sd[p + "11.weight"], sd[p + "11.bias"], 1), sd, p + "12."))
@@ -218,13 +262,15 @@ class Recognizer:
     def __init__(self, checkpoint_path):
         self.checkpoint_path = checkpoint_path
         self._weights = None
+        self._x_stride = 2
         self._lock = threading.Lock()
 
     def _ensure_loaded(self):
         with self._lock:
             if self._weights is None:
-                weights = load_state_dict(self.checkpoint_path)
+                weights, x_stride = load_checkpoint(self.checkpoint_path)
                 check_architecture(weights)
+                self._x_stride = x_stride
                 self._weights = weights
 
     @property
@@ -232,6 +278,11 @@ class Recognizer:
         return self._weights is not None
 
     def recognize(self, img):
+        """
+        Returns the text exactly as the model wrote it, including the mark for
+        a crossed-out word (alphabet_table.STRIKE_MARK). app.py removes the
+        mark from the text the user sees and keeps it in the training data.
+        """
         self._ensure_loaded()
-        log_probs = forward(self._weights, prepare_line(img))
+        log_probs = forward(self._weights, prepare_line(img), self._x_stride)
         return decode_beam_search(log_probs, beam_width=BEAM_WIDTH).strip()
