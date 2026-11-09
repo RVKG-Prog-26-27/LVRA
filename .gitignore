@@ -1,0 +1,34 @@
+node_modules
+*.log
+.DS_Store
+# Python: pagaidu faili un virtuālās vides
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Lokālie iestatījumi un piekļuves dati
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.idea/
+.vs/
+
+# Atkarības un kompilēšanas rezultāti
+node_modules/
+build/
+dist/
+bin/
+obj/
+
+
+# Sistēmas un pagaidu faili
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+.vscode/

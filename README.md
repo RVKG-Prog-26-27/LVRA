@@ -428,3 +428,5 @@ LVRA/
 ## Komanda un licence
 
 Projektu izstrādā komanda **Slepie**. Licence pašlaik nav norādīta.
+![alt text](image.png)
+![alt text](image-1.png)
