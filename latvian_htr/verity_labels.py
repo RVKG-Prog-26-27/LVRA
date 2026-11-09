@@ -5,6 +5,9 @@ import random
 import shutil
 import threading
 import time
+import subprocess
+import re
+import math
 import tkinter as tk
 from tkinter import messagebox
 
@@ -21,16 +24,19 @@ SETTINGS_PATH = os.path.join(FOLDER, ".verify_settings.json")
 ORIG_DIR = os.path.join(FOLDER, "_originals")
 PRIKOL_DIR = BASE / "prikol"   # GIFs for the slots are taken from this folder
 
-BG = "#1e1e1e"
-PANEL = "#252526"
-FG = "#e6e6e6"
-MUTED = "#8a8a8a"
-INPUT_BG = "#2d2d30"
-ACCENT = "#3a7bd5"
-BTN_BG = "#3c3c3c"
-BTN_ACTIVE = "#4a4a4a"
-CANVAS_BG = "#121212"
-SEL_COLOR = "#ffcc00"
+# Cosmic Purple theme
+BG = "#130924"
+PANEL = "#1d1035"
+PANEL_BORDER = "#4a2b82"
+FG = "#f3e8ff"
+MUTED = "#a78bfa"
+INPUT_BG = "#261546"
+ACCENT = "#8b5cf6"
+ACCENT_HOVER = "#9333ea"
+BTN_BG = "#2e1854"
+BTN_ACTIVE = "#5b21b6"
+CANVAS_BG = "#0b0518"
+SEL_COLOR = "#c084fc"
 
 GIF_SLOTS = 3                      # number of small media slots
 GIF_HEIGHT = 96                    # height of the small slots row (width stretches automatically)
@@ -49,9 +55,42 @@ MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS   # everything in the prikol folder with th
 
 RESAMPLE = getattr(Image, "Resampling", Image).LANCZOS
 RESAMPLE_FAST = getattr(Image, "Resampling", Image).BILINEAR
+
 # Zoom settings
-ZOOM_STEP = 1.2  # 20% zoom per step
-ZOOM_MAX = 10.0  # Maximum zoom: 10x
+ZOOM_STEP = 1.2
+ZOOM_MAX = 10.0
+
+# Git commit settings
+REAL_DATA_VERSION_START = 8  # Последний номер версии; следующий коммит будет 0.9
+
+
+def find_git():
+    """Find git.exe in PATH and common Windows installation locations."""
+    found = shutil.which("git")
+    if found and os.path.isfile(found):
+        return found
+
+    candidates = [
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files\Git\bin\git.exe",
+        r"C:\Program Files (x86)\Git\cmd\git.exe",
+        r"C:\Program Files (x86)\Git\bin\git.exe",
+    ]
+    for env_name in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+        base = os.environ.get(env_name)
+        if base:
+            candidates.extend([
+                os.path.join(base, "Programs", "Git", "cmd", "git.exe"),
+                os.path.join(base, "Git", "cmd", "git.exe"),
+            ])
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+GIT_EXE = find_git()
 
 
 def read_rows(path):
@@ -71,10 +110,15 @@ def read_rows(path):
 
 
 def make_button(parent, text, command):
-    return tk.Button(parent, text=text, command=command, bg=BTN_BG, fg=FG,
-                     activebackground=BTN_ACTIVE, activeforeground=FG,
-                     relief="flat", bd=0, padx=10, pady=6,
-                     font=("Segoe UI", 10), cursor="hand2")
+    btn = tk.Button(parent, text=text, command=command, bg=BTN_BG, fg=FG,
+                    activebackground=BTN_ACTIVE, activeforeground=FG,
+                    relief="flat", bd=0, padx=12, pady=6,
+                    font=("Segoe UI", 10, "bold"), cursor="hand2",
+                    highlightthickness=1, highlightbackground=PANEL_BORDER,
+                    highlightcolor=ACCENT)
+    btn.bind("<Enter>", lambda _e: btn.config(bg=BTN_ACTIVE))
+    btn.bind("<Leave>", lambda _e: btn.config(bg=BTN_BG))
+    return btn
 
 
 def make_copyable(parent, text, font, fg, height, width=80):
@@ -253,7 +297,7 @@ class MediaSlot:
         self.photo = None
 
         self.frame = tk.Frame(parent, bg=INPUT_BG, highlightthickness=1,
-                              highlightbackground="#3c3c3c")
+                              highlightbackground=PANEL_BORDER)
         self.label = tk.Label(self.frame, bg=INPUT_BG, fg=MUTED, font=("Segoe UI", 8),
                               cursor="hand2", bd=0)
         self.label.place(x=0, y=0, relwidth=1, relheight=1)
@@ -315,7 +359,7 @@ class MediaSlot:
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("Checking")
+        root.title("Checking — Cosmic Purple Edition")
         root.geometry("1500x720")
         root.minsize(950, 420)
         root.configure(bg=BG)
@@ -325,6 +369,10 @@ class App:
         self.dirty = False
         self.photo = None
         self.idx = self.load_progress()
+
+        # Starfield animation state
+        self.stars = []
+        self.star_phase = 0.0
 
         # img / view state
         self.img_size = (0, 0)        # file pixels
@@ -383,7 +431,7 @@ class App:
                             insertbackground=FG, selectbackground=ACCENT,
                             selectforeground="white", relief="flat", bd=0,
                             padx=10, pady=10, highlightthickness=1,
-                            highlightbackground="#3c3c3c", highlightcolor=ACCENT)
+                            highlightbackground=PANEL_BORDER, highlightcolor=ACCENT)
         self.text.pack(fill="both", expand=True)
 
         btns = tk.Frame(top, bg=PANEL)
@@ -406,6 +454,9 @@ class App:
             "Drag the dividers between the panels to resize them",
             ("Segoe UI", 9), MUTED, 6, width=58)
         self.hints.pack(fill="x", pady=(6, 0))
+        make_button(notes, "Commit changes to Git", self.commit_to_git).pack(
+            fill="x", pady=(8, 0)
+        )
 
         # big field: works like the small slots (stretches to the whole field)
         self.big_slot = MediaSlot(bottom, self.scan_prikol, self.save_settings, mode=BIG_MODE)
@@ -417,8 +468,11 @@ class App:
         self.load_settings()
 
         # ---------- right panel ----------
-        right = tk.Frame(hpane, bg=CANVAS_BG)
-        hpane.add(right, stretch="always", minsize=300)
+        right_outer = tk.Frame(hpane, bg=BG, padx=8, pady=8)
+        hpane.add(right_outer, stretch="always", minsize=300)
+        right = tk.Frame(right_outer, bg=CANVAS_BG, highlightthickness=1,
+                         highlightbackground=PANEL_BORDER)
+        right.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(right, bg=CANVAS_BG, highlightthickness=0, cursor="crosshair")
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda e: self.show_image())
@@ -459,7 +513,41 @@ class App:
         self.text.bind("<Control-z>", self.undo_line)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        self.init_stars()
+        self.animate_stars()
         self.load_current()
+
+    # ---------- Starfield background ----------
+    def init_stars(self):
+        self.stars = []
+        for _ in range(80):
+            self.stars.append({
+                "x": random.random(),
+                "y": random.random(),
+                "size": random.choice([1, 1, 2, 2, 3]),
+                "speed": random.uniform(0.5, 2.0),
+                "color": random.choice(["#ffffff", "#e9d5ff", "#c084fc", "#a855f7", "#7e22ce"]),
+            })
+
+    def draw_starfield(self, width, height):
+        for i, star in enumerate(self.stars):
+            alpha = (math.sin(self.star_phase * star["speed"] + i) + 1) / 2
+            if alpha < 0.2:
+                continue
+            x, y = star["x"] * width, star["y"] * height
+            size = star["size"]
+            color = star["color"]
+            if size == 1:
+                self.canvas.create_rectangle(x, y, x + 1, y + 1, fill=color, outline="")
+            else:
+                self.canvas.create_oval(x - size, y - size, x + size, y + size,
+                                         fill=color, outline="")
+
+    def animate_stars(self):
+        self.star_phase += 0.08
+        if self.canvas.winfo_exists():
+            self.show_image()
+            self.root.after(80, self.animate_stars)
 
     # ---------- status ----------
     def set_status(self, text):
@@ -604,9 +692,10 @@ class App:
     def show_image(self):
         self.canvas.delete("all")
         self.sel_id = None
-        im = self.get_image()
         cw = max(self.canvas.winfo_width(), 50)
         ch = max(self.canvas.winfo_height(), 50)
+        self.draw_starfield(cw, ch)
+        im = self.get_image()
         if im is None:
             self.img_size = (0, 0)
             self.canvas.create_text(cw // 2, ch // 2, text=f"No file:\n{self.current_path()}",
@@ -779,6 +868,159 @@ class App:
         self.show_image()
         self.set_status("Original restored")
 
+
+    # ---------- Git commit ----------
+    def commit_to_git(self):
+        """Save labels and commit dataset changes without exceeding Windows command length."""
+        global GIT_EXE
+
+        if not GIT_EXE or not os.path.isfile(GIT_EXE):
+            GIT_EXE = find_git()
+
+        if not GIT_EXE:
+            messagebox.showerror(
+                "Git commit",
+                "Не удалось найти git.exe.\n\n"
+                r"Ожидаемый путь: C:\Program Files\Git\cmd\git.exe"
+            )
+            return
+
+        self.commit_text()
+
+        if self.dirty:
+            try:
+                self.save()
+            except Exception as ex:
+                messagebox.showerror(
+                    "Git commit",
+                    f"Не удалось сохранить labels.csv:\n{ex}"
+                )
+                return
+
+        try:
+            # Определяем корень Git-репозитория.
+            result = subprocess.run(
+                [GIT_EXE, "rev-parse", "--show-toplevel"],
+                cwd=str(BASE),
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            repo_root = Path(result.stdout.strip()).resolve()
+
+            # Пути относительно корня репозитория.
+            csv_relative = CSV_PATH.resolve().relative_to(repo_root).as_posix()
+            images_relative = FOLDER.resolve().relative_to(repo_root).as_posix()
+
+            # Исключаем резервные копии и файлы состояния программы.
+            pathspecs = [
+                csv_relative,
+                images_relative + "/",
+                f":(exclude,glob){images_relative}/_originals/**",
+                f":(exclude){images_relative}/.verify_progress",
+                f":(exclude){images_relative}/.verify_settings.json",
+            ]
+
+            # Добавляем изменения в Git без передачи тысяч отдельных путей.
+            subprocess.run(
+                [GIT_EXE, "add", "-A", "--", *pathspecs],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            # Проверяем, появились ли изменения.
+            changed = subprocess.run(
+                [GIT_EXE, "diff", "--cached", "--quiet", "--", *pathspecs],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True
+            )
+
+            if changed.returncode == 0:
+                self.set_status("Git: нет новых изменений для коммита")
+                return
+
+            if changed.returncode != 1:
+                raise RuntimeError(
+                    changed.stderr or "Не удалось проверить изменения Git"
+                )
+
+            # Получаем историю коммитов и определяем следующую версию.
+            history = subprocess.run(
+                [GIT_EXE, "log", "--all", "--format=%s"],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            version = REAL_DATA_VERSION_START
+
+            for subject in (history.stdout or "").splitlines():
+                match = re.match(
+                    r"^real data 0\.(\d+)(?:\s|$)",
+                    subject.strip(),
+                    re.IGNORECASE
+                )
+
+                if match:
+                    version = max(version, int(match.group(1)))
+
+            version += 1
+
+            # Создаём сообщение коммита.
+            current_file = self.rows[self.idx][0]
+
+            commit_message = (
+                f"real data 0.{version} checked till {current_file}"
+            )
+
+            # Создаём коммит.
+            commit = subprocess.run(
+                [
+                    GIT_EXE,
+                    "commit",
+                    "-m",
+                    commit_message,
+                    "--only",
+                    "--",
+                    *pathspecs
+                ],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True
+            )
+
+            if commit.returncode != 0:
+                details = (commit.stderr or commit.stdout).strip()
+                raise RuntimeError(details or "Git commit failed")
+
+            self.set_status(f"Committed: {commit_message}")
+
+            messagebox.showinfo(
+                "Git commit",
+                f"Коммит создан успешно:\n\n{commit_message}"
+            )
+
+        except subprocess.CalledProcessError as ex:
+            details = (ex.stderr or ex.stdout or str(ex)).strip()
+            messagebox.showerror("Git commit", details)
+
+        except FileNotFoundError as ex:
+            messagebox.showerror(
+                "Git commit",
+                f"Не удалось запустить Git.\n\n"
+                f"Git: {GIT_EXE}\n"
+                f"Путь: {ex.filename}\n"
+                f"Ошибка: {ex}"
+            )
+
+        except Exception as ex:
+            messagebox.showerror("Git commit", str(ex))
+        
     # ---------- key handlers ----------
     def on_save_key(self, e):
         self.save()

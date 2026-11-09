@@ -1,7 +1,10 @@
 node_modules
 *.log
 .DS_Store
+<<<<<<< HEAD
 __pycache__/
+=======
+>>>>>>> da838fdbf9ad5c678a4f6ecd126e8168ba828c38
 # Python: pagaidu faili un virtuālās vides
 __pycache__/
 *.py[cod]
@@ -25,9 +28,12 @@ dist/
 bin/
 obj/
 
+<<<<<<< HEAD
 # Lielie dati un modeļu kontrolpunkti
 /data/raw/
 /models/checkpoints/
+=======
+>>>>>>> da838fdbf9ad5c678a4f6ecd126e8168ba828c38
 
 # Sistēmas un pagaidu faili
 .DS_Store
@@ -35,6 +41,7 @@ Thumbs.db
 *.log
 *.tmp
 
+<<<<<<< HEAD
 # Игнорируем чекпоинты моделей
 latvian_htr/checkpoints/
 latvian_htr/checkpoints_v2/
@@ -44,4 +51,6 @@ latvian_htr/data/real_dataset/images/
 latvian_htr/data/synth_100k/
 latvian_htr/data/synth_30k/
 latvian_htr/samples/
+=======
+>>>>>>> da838fdbf9ad5c678a4f6ecd126e8168ba828c38
 .vscode/
