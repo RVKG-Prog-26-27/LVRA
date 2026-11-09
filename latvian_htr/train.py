@@ -4,6 +4,8 @@ Neironu tīkla apmācības skripts (ускоренная версия).
 Kā skriet:
     # 1) один раз сгенерировать набор (все ядра процессора):
     python make_synth_dataset.py --out data/synth_30k --n 30000
+    # 1b) упаковать его для чтения из RAM (после КАЖДОЙ новой генерации; необязательно):
+    python packed_lines.py data/synth_30k
     # 2) обучать на нём с нуля (500 примеров автоматически откладываются для проверки):
     python train.py --synth-data data/synth_30k --steps 20000
     python train.py --synth-data data/synth_30k --real-data data/real_dataset   # + реальные сканы
@@ -35,6 +37,7 @@ from torch.utils.data import ConcatDataset, DataLoader, Subset
 
 from alphabet import NUM_CLASSES, decode_greedy
 from dataset import BucketBatchSampler, LineFolderDataset, SyntheticBucketStream, collate_batch
+from packed_lines import open_line_dataset   # data/<набор>/packed/ -> чтение из RAM (см. packed_lines.py)
 from evaluate import cer
 from model import CRNN, load_checkpoint, save_checkpoint
 
@@ -79,7 +82,7 @@ def loader_kwargs(args, device) -> dict:
 
 def build_folder_loader(args, device):
     """Режим «готовый набор»: обучаемся по кругу на картинках из --synth-data (+ --real-data)."""
-    synth = LineFolderDataset(args.synth_data, as_uint8=True)
+    synth = open_line_dataset(args.synth_data, as_uint8=True)
     t0 = time.perf_counter()
     synth_w = synth.widths()
     print(f"Synthetic set: {len(synth)} lines from {args.synth_data} (widths read in {time.perf_counter() - t0:.1f}s)")
@@ -89,7 +92,7 @@ def build_folder_loader(args, device):
     order = list(range(len(synth)))
     random.Random(12345).shuffle(order)
     if args.val_data:
-        val_set = LineFolderDataset(args.val_data, as_uint8=True)
+        val_set = open_line_dataset(args.val_data, as_uint8=True)
         train_idx = order
     else:
         n_val = min(args.val_size, len(synth) // 10)
@@ -100,7 +103,7 @@ def build_folder_loader(args, device):
     parts, widths = [Subset(synth, train_idx)], [synth_w[i] for i in train_idx]
     if args.real_data:
         # Реальные строки просто добавляются к набору (как раньше ConcatDataset).
-        real = LineFolderDataset(args.real_data, as_uint8=True)
+        real = open_line_dataset(args.real_data, as_uint8=True)
         parts.append(real)
         widths += real.widths()
         print(f"Real data: {len(real)} lines added to training set")
@@ -207,6 +210,8 @@ def train(args):
     batches = iter(loader)
     t_last, data_time = time.perf_counter(), 0.0
     bad_total = 0
+    best_key, no_improve = None, 0   # лучший результат проверки (CER, loss) и сколько проверок без улучшения
+    vram_total = torch.cuda.get_device_properties(0).total_memory / 2**30 if device.type == "cuda" else 0
     while step < args.steps:
         t0 = time.perf_counter()
         images, targets, target_lengths, widths, texts = next(batches)
@@ -246,10 +251,14 @@ def train(args):
             now = time.perf_counter()
             dt = now - t_last
             epoch_info = f"epoch {step * args.batch_size / epoch_size:.1f}  " if epoch_size else ""
+            # VRAM: сколько видеопамяти занято сейчас / пик. Если пик близко к объёму карты, Windows может
+            # тайком класть данные в обычную RAM ("shared GPU memory") - и шаг становится в 10-20 раз медленнее.
+            mem_info = (f"  VRAM {torch.cuda.memory_reserved() / 2**30:.1f}/{vram_total:.0f} GB "
+                        f"(peak {torch.cuda.max_memory_reserved() / 2**30:.1f})") if device.type == "cuda" else ""
             print(f"{step}/{args.steps}  {epoch_info}failure={loss.item():.4f}  "
                   f"{dt / args.log_every * 1000:.0f} ms/step  "
                   f"(data wait {data_time / dt * 100:.0f}%)  "
-                  f"ETA {(args.steps - step) * dt / args.log_every / 60:.0f} min")
+                  f"ETA {(args.steps - step) * dt / args.log_every / 60:.0f} min{mem_info}")
             t_last, data_time = now, 0.0
         if step % args.checkpoint_every == 0 or step == args.steps:
             ckpt_path = os.path.join(args.checkpoint_dir, f"crnn_step{step}.pt")
@@ -258,6 +267,20 @@ def train(args):
             if val_batches:
                 v_loss, v_cer = validate(model, val_batches, device, use_amp, ctc_loss)
                 print(f"[validation] step {step}: loss={v_loss:.4f}  CER={v_cer:.3f}")
+                # Лучший чекпоинт по проверке (сначала CER, при равном CER - loss) -> crnn_best.pt
+                if best_key is None or (v_cer, v_loss) < best_key:
+                    best_key, no_improve = (v_cer, v_loss), 0
+                    best_path = os.path.join(args.checkpoint_dir, "crnn_best.pt")
+                    save_checkpoint(model, best_path, step)
+                    print(f"[validation] new best -> {best_path}")
+                else:
+                    no_improve += 1
+                    print(f"[validation] no improvement for {no_improve} check(s) "
+                          f"(best CER={best_key[0]:.3f}, loss={best_key[1]:.4f})")
+                    if args.early_stop and no_improve >= args.early_stop:
+                        print(f"Early stop: проверка не улучшалась {no_improve} раз подряд. "
+                              f"Лучшие веса: {os.path.join(args.checkpoint_dir, 'crnn_best.pt')}")
+                        break
                 t_last = time.perf_counter()     # время проверки не считаем в ms/step
 
     print("Complete!")
@@ -288,6 +311,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")  # where to save
     parser.add_argument("--resume", type=str, default=None, help="чекпоинт для дообучения")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--early-stop", type=int, default=0,
+                        help="остановить обучение, если проверка не улучшалась N раз подряд (0 = выключено)")
     args = parser.parse_args()
 
     # Fiksējam «nejaušību», lai palaišanu varētu atkārtot ar tādu pašu rezultātu.
