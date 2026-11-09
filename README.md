@@ -428,5 +428,38 @@ LVRA/
 ## Komanda un licence
 
 Projektu izstrādā komanda **Slepie**. Licence pašlaik nav norādīta.
-![alt text](image.png)
-![alt text](image-1.png)
+
+## Testēšanas rezultāti
+
+=== REĀLIE paraugi: 3007 paraugi, CER = 0.622  (precīzi sakrīt: 2/3007) ===
+  pareizi : Ekonomika izdala (3 vai 4) tirgus dalībniekus
+  modelis : – uunM N°olLa b“ 4) A VVU) lLLlwLXwI)
+
+  pareizi : 1,3,5,7 - reala ekonomika,
+  modelis : D257 – MUX DhVMA
+
+  pareizi : 2,4,6,8 - nereala (virtuala) ekonomika,
+  modelis : Z.)U) 6(8 – C MNLXLO CLMM≈OLD) LhOIwM
+
+  pareizi : M - money,
+  modelis : –II– MONV
+
+  pareizi : Monopolija uz eiro ražošana pieder tikai ECB,
+  modelis : MoMja Uz vā Mx HilX thx ECl)
+
+
+=== SINTĒTISKIE (svaigi): 400 paraugi, CER = 0.010  (precīzi sakrīt: 325/400) ===
+  pareizi : vieglāk dzintara aprīkojuma
+  modelis : vieglāk dzintara aprīkojuma
+
+  pareizi : prodekāns, veicinātu pulveris.
+  modelis : prodekāns, veicinātu pulveris.
+
+  pareizi : centās durvīm arī šādas izstāties, kad Labu atspoguļojums,
+  modelis : centās durvīm arī šādas izstāties, kad Labu atspoguļojums,
+
+  pareizi : vecākiem – ii ir kur (3087)
+  modelis : vecākiem – ii ir kur (3087)
+
+  pareizi : un ¤ izlutināta,
+  modelis : un ¤ izlutināta,
