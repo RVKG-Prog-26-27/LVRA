@@ -1,9 +1,11 @@
 /**
  * Browser-side image handling: open the user's file, draw it rotated and
- * scaled, and export the JPEG that is sent for recognition.
+ * scaled, and cut it into line images for recognition.
  * Everything happens in memory; nothing is written to disk or storage.
  */
 import { AppError } from '../recognition/errors';
+import type { LineImage } from '../recognition/types';
+import { splitCanvasIntoLines } from './lineSegmentation';
 import { fitWithin, rotatedSize, type Rotation, type Size } from './imageSize';
 
 export interface LoadedImage {
@@ -53,7 +55,7 @@ export async function loadImageFile(file: File | null | undefined): Promise<Load
   }
 }
 
-/** Draws the image - rotated and scaled to fit maxLong x maxShort onto the canvas */
+/** Draws the image rotated and scaled to fit maxLong x maxShort onto the given canvas. */
 export function drawRotated(
   canvas: HTMLCanvasElement,
   image: LoadedImage,
@@ -73,7 +75,7 @@ export function drawRotated(
   const drawWidth = swap ? target.height : target.width;
   const drawHeight = swap ? target.width : target.height;
 
-  ctx.fillStyle = '#ffffff'; // draws background to PNG without one
+  ctx.fillStyle = '#ffffff'; // White paper behind transparent PNGs.
   ctx.fillRect(0, 0, target.width, target.height);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -84,26 +86,34 @@ export function drawRotated(
   ctx.restore();
 }
 
-/** Produces the PNG (max 1920 x 1080) that is sent for recognition. */
-export async function prepareImageForRecognition(
+/**
+ * Rotates and scales the photo (max 1920 x 1080 in its orientation), then
+ * splits it into line images 0001.png, 0002.png, ... (top line first).
+ * The full photo itself is never sent anywhere.
+ */
+export async function prepareLineImages(
   image: LoadedImage,
   rotation: Rotation,
-  options: { maxLongSide: number; maxShortSide: number; pngQuality: number },
-): Promise<Blob> {
+  options: { maxLongSide: number; maxShortSide: number; maxLines: number },
+): Promise<LineImage[]> {
   const canvas = document.createElement('canvas');
+  let blobs: Blob[];
   try {
     drawRotated(canvas, image, rotation, options.maxLongSide, options.maxShortSide);
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/png', options.pngQuality),
-    );
-    if (!blob || blob.size === 0) throw new AppError('IMAGE_PROCESSING_FAILED', 'Empty PNG');
-    return blob;
+    blobs = await splitCanvasIntoLines(canvas);
   } catch (error) {
-    if (error instanceof AppError) throw error;
     throw new AppError('IMAGE_PROCESSING_FAILED', error instanceof Error ? error.message : undefined);
   } finally {
     // Release canvas memory right away (important on phones).
     canvas.width = 0;
     canvas.height = 0;
   }
+  if (blobs.length === 0) throw new AppError('NO_TEXT_FOUND', 'No text lines found');
+  if (blobs.length > options.maxLines) throw new AppError('POOR_QUALITY', `${blobs.length} lines found`);
+  return blobs.map((blob, i) => ({ filename: lineFilename(i), blob }));
+}
+
+/** 0 -> 0001.png, the naming used by latvian_htr's labels.csv. */
+export function lineFilename(index: number): string {
+  return `${String(index + 1).padStart(4, '0')}.png`;
 }

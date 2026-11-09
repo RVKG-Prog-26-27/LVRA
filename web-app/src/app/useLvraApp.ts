@@ -1,7 +1,6 @@
-// does all the work to get to the screen that appState.ts decides
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import { config } from '../config/config';
-import { loadImageFile, prepareImageForRecognition, type LoadedImage } from '../image/imageProcessing';
+import { loadImageFile, prepareLineImages, type LoadedImage } from '../image/imageProcessing';
 import { createRecognitionService } from '../recognition/createRecognitionService';
 import { toAppError } from '../recognition/errors';
 import { mockSettings } from '../recognition/mockSettings';
@@ -9,14 +8,18 @@ import { recognizeHandwriting } from '../recognition/recognizeHandwriting';
 import { buildSegments } from '../recognition/segments';
 import { appReducer, initialState } from './appState';
 
-/** Connects the UI to the image and recognition layers. */
-export function useLvraApp() {
+/**
+ * Connects the UI to the image and recognition layers.
+ * trainingConsent is the user's choice in the terms window; it is sent to the
+ * server, which keeps the line images for training only when it is true.
+ */
+export function useLvraApp(trainingConsent: boolean) {
   const service = useMemo(() => createRecognitionService(), []);
   const [state, dispatch] = useReducer(appReducer, initialState);
   const imageRef = useRef<LoadedImage | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  /** Deletes the image from memory - when recognition is done or the  */
+  /** Deletes the image from memory. Called after recognition and whenever the user starts over. */
   const releaseImage = useCallback(() => {
     imageRef.current?.release();
     imageRef.current = null;
@@ -59,15 +62,20 @@ export function useLvraApp() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const jpeg = await prepareImageForRecognition(image, rotation, config.image);
+      const lines = await prepareLineImages(image, rotation, { ...config.image, maxLines: config.lines.maxLines });
       const timeoutMs = mockSettings.timeoutOverrideMs || config.recognitionTimeoutMs;
-      const result = await recognizeHandwriting(service, jpeg, { timeoutMs, signal: controller.signal });
+      const result = await recognizeHandwriting(service, lines, {
+        timeoutMs,
+        trainingConsent,
+        signal: controller.signal,
+      });
 
-      // Recognition succeeded: delete the image
+      // Recognition succeeded: delete the image right away, keep only the text.
       releaseImage();
+      const words = config.highlightUncertainWords ? result.words : [];
       dispatch({
         type: 'RECOGNIZE_SUCCESS',
-        segments: buildSegments(result.text, result.words, config.uncertainConfidenceThreshold),
+        segments: buildSegments(result.text, words, config.uncertainConfidenceThreshold),
       });
     } catch (error) {
       const { code } = toAppError(error);
@@ -76,7 +84,7 @@ export function useLvraApp() {
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [state, service, releaseImage]);
+  }, [state, service, releaseImage, trainingConsent]);
 
   const cancel = useCallback(() => abortRef.current?.abort(), []);
 

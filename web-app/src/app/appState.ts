@@ -1,5 +1,7 @@
 /**
- * handles all app screens
+ * The app's screens as a small state machine. Pure and side-effect free, so
+ * it can be unit tested; releasing images and calling services happens in
+ * useLvraApp.ts.
  *
  *   pick -> loading -> preview -> recognizing -> result
  *                        ^            |
@@ -31,7 +33,6 @@ export type AppAction =
 
 export const initialState: AppState = { step: 'pick', notice: null, error: null };
 
-// holds info about current and previous screens and returns next screen, also goes back to preview if recognition fails
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SELECTION_CANCELLED':
