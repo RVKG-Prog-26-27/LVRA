@@ -19,7 +19,7 @@ DIGITS = "0123456789"
 # Rakstzīme \" virknē tiek rakstīta ar atpakaļvērstās slīpsvītru, lai Python nevarētu pieņemt lēmumu
 # ka līnija ir beigusies.
 PUNCT = (
-    " .,!?-:;()\"'/•"                        # pamata pieturzīmes
+    " .,!?-:;()\"'/•°≈öÇöüĆ"                        # pamata pieturzīmes
     + "\u201e\u201c\u201d\u2018\u2019"       # „ " " ' ' (latviešu/izliektas pēdiņas)
     + "\u2013\u2014"                         # – – (defise en un em)
     + "[]{}"                                 # iekavas 
