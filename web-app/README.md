@@ -92,23 +92,22 @@ Add `?dev=1` to the address, for example http://localhost:5173/?dev=1. A panel a
 
 The panel is a developer tool and is in English on purpose. It records images only while it is enabled.
 
-## Deploying on PythonAnywhere (EU), account cloudy1337
+## Deploying on PythonAnywhere (EU)
 
-The free plan allows one web app, so the website and the AI run as one Flask app at https://cloudy1337.eu.pythonanywhere.com.
-
+The free plan allows one web app, so the website and the AI run as one Flask app
 ### 1. Build the website on your computer
 
 In the `web-app` folder: `npm run build`. This creates `web-app/dist`.
 
 ### 2. Upload the files
 
-Sign in at https://eu.pythonanywhere.com. In the **Files** tab create `/home/cloudy1337/LVRA` and upload into it:
+Sign in at https://eu.pythonanywhere.com. In the **Files** tab create `/home/user.name/LVRA` and upload into it:
 
 ```
-/home/cloudy1337/LVRA/web-app/server/        app.py, htr_numpy.py, alphabet_table.py
-/home/cloudy1337/LVRA/web-app/dist/          everything from dist (index.html, favicon.svg, assets/)
-/home/cloudy1337/LVRA/web-app/requirements.txt
-/home/cloudy1337/LVRA/latvian_htr/checkpoints_v2/crnn_step30000.pt
+/home/user.name/LVRA/web-app/server/        app.py, htr_numpy.py, alphabet_table.py
+/home/user.name/LVRA/web-app/dist/          everything from dist (index.html, favicon.svg, assets/)
+/home/user.name/LVRA/web-app/requirements.txt
+/home/user.name/LVRA/latvian_htr/checkpoints_v2/crnn_step30000.pt
 ```
 
 Do not upload `node_modules`. The free plan has little disk space, so upload only the one checkpoint the server uses. An easier way for many files: zip them on your computer, upload the zip, then in a **Bash console** go to the folder with `cd ~` and unpack it with `unzip` followed by the zip's name.
@@ -135,9 +134,9 @@ On the Web tab, open the link **WSGI configuration file**, delete everything in 
 import os
 import sys
 
-os.environ.setdefault("LVRA_DATA_DIR", "/home/cloudy1337/lvra_data/real_dataset")
+os.environ.setdefault("LVRA_DATA_DIR", "/home/user.name/lvra_data/real_dataset")
 
-path = "/home/cloudy1337/LVRA/web-app/server"
+path = "/home/user.name/LVRA/web-app/server"
 if path not in sys.path:
     sys.path.insert(0, path)
 
@@ -152,8 +151,8 @@ On the Web tab switch on **Force HTTPS** (copying to the clipboard needs HTTPS),
 
 ### 7. Check
 
-- https://cloudy1337.eu.pythonanywhere.com/api/health should show `true` for `website_built` and `checkpoint_found`. `model_loaded` turns `true` after the first recognition.
-- https://cloudy1337.eu.pythonanywhere.com shows the app.
+- https://user.name.eu.pythonanywhere.com/api/health should show `true` for `website_built` and `checkpoint_found`. `model_loaded` turns `true` after the first recognition.
+- https://user.name.eu.pythonanywhere.com shows the app.
 - If something fails, the Web tab has an **Error log** link.
 
 ### Keeping it running

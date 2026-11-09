@@ -1,3 +1,7 @@
+node_modules
+*.log
+.DS_Store
+__pycache__/
 # Python: pagaidu faili un virtuālās vides
 __pycache__/
 *.py[cod]
