@@ -9,9 +9,10 @@ import subprocess
 import re
 import math
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import messagebox
 
-from PIL import Image, ImageOps, ImageSequence, ImageTk
+from PIL import Image, ImageOps, ImageTk, ImageDraw, ImageFilter
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -37,21 +38,22 @@ BTN_BG = "#2e1854"
 BTN_ACTIVE = "#5b21b6"
 CANVAS_BG = "#0b0518"
 SEL_COLOR = "#c084fc"
+OK_COLOR = "#4ade80"
+ERR_COLOR = "#f87171"
 
 GIF_SLOTS = 3                      # number of small media slots
-GIF_HEIGHT = 96                    # height of the small slots row (width stretches automatically)
-BIG_HEIGHT = 220                   # initial height of the big field (drag the divider to change)
-BIG_MODE = "stretch"               # "stretch" = fill the whole field (like the small slots), "fit" = keep proportions
-LEFT_WIDTH = 780                   # initial width of the left panel (drag the divider to change)
-STATIC_MAX = 2500                  # photos are downscaled to this size once, then resized quickly
+GIF_HEIGHT = 96                    # height of the small slots row
+BIG_HEIGHT = 220                   # initial height of the big field
+BIG_MODE = "stretch"               # "stretch" or "fit"
+LEFT_WIDTH = 780                   # initial width of the left panel
+STATIC_MAX = 2500                  # downscale max size
 MAX_VIDEO_FPS = 60
 
 IMAGE_EXTS = {".gif", ".webp", ".apng", ".png", ".jpg", ".jpeg", ".jfif", ".bmp",
               ".tif", ".tiff", ".ico", ".ppm", ".pgm"}
-# videos need OpenCV:  pip install opencv-python-headless   (no sound, looped)
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv", ".mpg",
               ".mpeg", ".mpe", ".3gp", ".ogv", ".ts", ".mts", ".m2ts", ".vob", ".asf"}
-MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS   # everything in the prikol folder with these extensions
+MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS
 
 RESAMPLE = getattr(Image, "Resampling", Image).LANCZOS
 RESAMPLE_FAST = getattr(Image, "Resampling", Image).BILINEAR
@@ -60,16 +62,103 @@ RESAMPLE_FAST = getattr(Image, "Resampling", Image).BILINEAR
 ZOOM_STEP = 1.2
 ZOOM_MAX = 10.0
 
+# Starfield settings
+STAR_COUNT = 260
+STAR_TWINKLE_SHADES = 8
+
 # Git commit settings
-REAL_DATA_VERSION_START = 8  # Последний номер версии; следующий коммит будет 0.9
+REAL_DATA_VERSION_START = 8
+
+
+def _round_polygon_points(x0, y0, x1, y1, r, steps=24):
+    """Flat list of polygon points approximating a rounded rectangle."""
+    r = max(1, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
+    pts = []
+    corners = ((x1 - r, y1 - r, 0), (x0 + r, y1 - r, 90),
+               (x0 + r, y0 + r, 180), (x1 - r, y0 + r, 270))
+    for cx, cy, a0 in corners:
+        for i in range(steps + 1):
+            a = math.radians(a0 + 90.0 * i / steps)
+            pts.extend((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
+
+
+class RoundedFrame(tk.Frame):
+    """Frame with rounded corners and outline."""
+
+    def __init__(self, master, radius=14, fill=PANEL, outline=PANEL_BORDER, ow=1, **kw):
+        try:
+            bg = kw.pop("bg", master.cget("bg"))
+        except Exception:
+            bg = kw.pop("bg", BG)
+        super().__init__(master, bg=bg, **kw)
+        self._radius, self._fill, self._outline, self._ow = radius, fill, outline, ow
+        self._canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0)
+        self._canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._rect = self._canvas.create_polygon(0, 0, fill=fill, outline=outline, width=ow)
+        
+        self.inner = tk.Frame(self._canvas, bg=fill, bd=0, highlightthickness=0)
+        self._win = self._canvas.create_window(0, 0, window=self.inner, anchor="nw")
+        self._canvas.tag_lower(self._rect)
+        self._canvas.bind("<Configure>", self._redraw)
+
+    def set_outline(self, color):
+        self._outline = color
+        self._canvas.itemconfig(self._rect, outline=color)
+
+    def _redraw(self, e):
+        w, h = max(e.width, 4), max(e.height, 4)
+        r = max(1, min(self._radius, (w - 2) // 2, (h - 2) // 2))
+        self._canvas.coords(self._rect, _round_polygon_points(1, 1, w - 1, h - 1, r))
+        m = self._ow + max(1, int(r - r / math.sqrt(2)))
+        self._canvas.coords(self._win, m, m)
+        self._canvas.itemconfigure(self._win, width=max(w - 2 * m, 1), height=max(h - 2 * m, 1))
+
+
+class RoundedButton(tk.Canvas):
+    """Button with rounded corners."""
+
+    def __init__(self, master, text, command, fill=BTN_BG, hover=BTN_ACTIVE,
+                 fg=FG, radius=12, font=("Segoe UI", 10, "bold")):
+        try:
+            bg = master.cget("bg")
+        except Exception:
+            bg = BG
+        self._font = tkfont.Font(font=font)
+        tw = self._font.measure(text)
+        th = self._font.metrics("linespace")
+        w, h = tw + 30, th + 16
+        super().__init__(master, width=w, height=h, bg=bg, highlightthickness=0,
+                         bd=0, cursor="hand2")
+        self._command = command
+        self._fill, self._hover, self._fg, self._radius = fill, hover, fg, radius
+        self._rect = self.create_polygon(0, 0, fill=fill, outline=PANEL_BORDER, width=1)
+        self._txt = self.create_text(0, 0, text=text, font=self._font, fill=fg)
+        self.bind("<Configure>", self._redraw)
+        self.bind("<Enter>", lambda _e: self.itemconfig(self._rect, fill=self._hover))
+        self.bind("<Leave>", lambda _e: self.itemconfig(self._rect, fill=self._fill))
+        self.bind("<Button-1>", lambda _e: self._command())
+        self._redraw(None)
+
+    def _redraw(self, _e):
+        try:
+            w = self.winfo_width()
+            h = self.winfo_height()
+            if w <= 2:
+                w = int(self.cget("width"))
+            if h <= 2:
+                h = int(self.cget("height"))
+        except Exception:
+            return
+        r = max(1, min(self._radius, (h - 2) // 2))
+        self.coords(self._rect, _round_polygon_points(1, 1, w - 1, h - 1, r))
+        self.coords(self._txt, w / 2, h / 2)
 
 
 def find_git():
-    """Find git.exe in PATH and common Windows installation locations."""
     found = shutil.which("git")
     if found and os.path.isfile(found):
         return found
-
     candidates = [
         r"C:\Program Files\Git\cmd\git.exe",
         r"C:\Program Files\Git\bin\git.exe",
@@ -83,7 +172,6 @@ def find_git():
                 os.path.join(base, "Programs", "Git", "cmd", "git.exe"),
                 os.path.join(base, "Git", "cmd", "git.exe"),
             ])
-
     for candidate in candidates:
         if os.path.isfile(candidate):
             return candidate
@@ -110,19 +198,10 @@ def read_rows(path):
 
 
 def make_button(parent, text, command):
-    btn = tk.Button(parent, text=text, command=command, bg=BTN_BG, fg=FG,
-                    activebackground=BTN_ACTIVE, activeforeground=FG,
-                    relief="flat", bd=0, padx=12, pady=6,
-                    font=("Segoe UI", 10, "bold"), cursor="hand2",
-                    highlightthickness=1, highlightbackground=PANEL_BORDER,
-                    highlightcolor=ACCENT)
-    btn.bind("<Enter>", lambda _e: btn.config(bg=BTN_ACTIVE))
-    btn.bind("<Leave>", lambda _e: btn.config(bg=BTN_BG))
-    return btn
+    return RoundedButton(parent, text, command)
 
 
 def make_copyable(parent, text, font, fg, height, width=80):
-    """Read-only text that can be selected with the mouse and copied (Ctrl+C / right click)."""
     t = tk.Text(parent, height=height, width=width, wrap="word", font=font, bg=PANEL, fg=fg,
                 relief="flat", bd=0, highlightthickness=0, padx=0, pady=0,
                 selectbackground=ACCENT, selectforeground="white", cursor="xterm")
@@ -160,9 +239,6 @@ def target_size(src_w, src_h, tw, th, mode):
 
 
 class MediaWorker(threading.Thread):
-    """Decodes an image / GIF / video in the background and hands ready-to-show frames to the slot.
-    The UI thread never decodes or resizes anything, so big files do not freeze the window."""
-
     def __init__(self, slot, path):
         super().__init__(daemon=True)
         self.slot = slot
@@ -188,14 +264,13 @@ class MediaWorker(threading.Thread):
                 if self.slot.worker is self:
                     self.slot.error = f"cannot open\n{self.path.name}\n{str(ex)[:60]}"
 
-    # ---- pictures and GIFs ----
     def run_image(self):
         bgcol = (45, 45, 48, 255)
         with Image.open(self.path) as im:
             n = getattr(im, "n_frames", 1)
             if n <= 1:
                 try:
-                    im = ImageOps.exif_transpose(im)      # photos: respect EXIF rotation
+                    im = ImageOps.exif_transpose(im)
                 except Exception:
                     pass
                 rgba = im.convert("RGBA")
@@ -208,7 +283,7 @@ class MediaWorker(threading.Thread):
                     size = target_size(base.width, base.height, tgt[0], tgt[1], self.slot.mode)
                     self.publish(base.resize(size, RESAMPLE))
                     while not self.stop_event.is_set() and self.slot.target == tgt:
-                        self.stop_event.wait(0.1)         # wait until the slot is resized
+                        self.stop_event.wait(0.1)
                 return
             i = 0
             next_time = time.perf_counter()
@@ -230,10 +305,9 @@ class MediaWorker(threading.Thread):
                 if wait > 0:
                     self.stop_event.wait(wait)
                 else:
-                    next_time = time.perf_counter()        # decoding is slower than the GIF - do not accumulate lag
+                    next_time = time.perf_counter()
                 i = (i + 1) % n
 
-    # ---- video ----
     def run_video(self):
         try:
             import cv2
@@ -252,11 +326,11 @@ class MediaWorker(threading.Thread):
             while not self.stop_event.is_set():
                 expected = int((time.perf_counter() - t0) * fps)
                 while idx < expected - 1 and not self.stop_event.is_set():
-                    if not cap.grab():                     # too slow -> skip frames, keep in sync
+                    if not cap.grab():
                         break
                     idx += 1
                 ok, frame = cap.read()
-                if not ok:                                  # end of the video -> loop
+                if not ok:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     idx, t0 = 0, time.perf_counter()
                     ok, frame = cap.read()
@@ -278,10 +352,6 @@ class MediaWorker(threading.Thread):
 
 
 class MediaSlot:
-    """Box for an image / GIF / video taken from the prikol folder.
-    mode="stretch" - the picture fills the whole box, mode="fit" - it keeps its proportions.
-    Left click - next file from the folder, right click - random file."""
-
     POLL_MS = 20
 
     def __init__(self, parent, scan, on_change, mode="stretch"):
@@ -296,14 +366,15 @@ class MediaSlot:
         self.target = (96, 96)
         self.photo = None
 
-        self.frame = tk.Frame(parent, bg=INPUT_BG, highlightthickness=1,
-                              highlightbackground=PANEL_BORDER)
-        self.label = tk.Label(self.frame, bg=INPUT_BG, fg=MUTED, font=("Segoe UI", 8),
+        self.frame = RoundedFrame(parent, radius=10, fill=INPUT_BG, outline=PANEL_BORDER)
+        self.label = tk.Label(self.frame.inner, bg=INPUT_BG, fg=MUTED, font=("Segoe UI", 8),
                               cursor="hand2", bd=0)
         self.label.place(x=0, y=0, relwidth=1, relheight=1)
-        for w in (self.frame, self.label):
+        for w in (self.frame, self.frame.inner, self.label):
             w.bind("<Button-1>", self.next_file)
             w.bind("<Button-3>", self.random_file)
+        self.frame.bind("<Enter>", lambda _e: self.frame.set_outline(ACCENT))
+        self.frame.bind("<Leave>", lambda _e: self.frame.set_outline(PANEL_BORDER))
         self.frame.bind("<Configure>", self.on_resize)
         self.show_empty()
         self.frame.after(self.POLL_MS, self.poll)
@@ -359,7 +430,7 @@ class MediaSlot:
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("Checking — Cosmic Purple Edition")
+        root.title("🌌 Checking — Cosmic Purple Edition")
         root.geometry("1500x720")
         root.minsize(950, 420)
         root.configure(bg=BG)
@@ -373,44 +444,48 @@ class App:
         # Starfield animation state
         self.stars = []
         self.star_phase = 0.0
+        self.space_base = None
+        self.space_photo = None
+        self._bg_key = None
+        self.meteors = []
+        self.next_meteor = time.perf_counter() + random.uniform(4, 10)
 
         # img / view state
-        self.img_size = (0, 0)        # file pixels
-        self._cache = None            # (path, mtime, PIL image)
-        self.zoom = 1.0               # 1.0 = fit to window
-        self.view_ox = None           # image offset on canvas (None = centered)
+        self.img_size = (0, 0)
+        self._cache = None
+        self.zoom = 1.0
+        self.view_ox = None
         self.view_oy = None
-        self.ox = 0.0                 # current layout
+        self.ox = 0.0
         self.oy = 0.0
         self.eff_scale = 1.0
         self.pan_start = None
-        self.sel_start = None         # selection is stored in IMAGE pixels
-        self.sel = None               # (x0, y0, x1, y1) in image pixels
+        self.sel_start = None
+        self.sel = None
         self.sel_id = None
 
-        # ---------- layout: [ left panel | image ]  (dividers can be dragged) ----------
-        hpane = tk.PanedWindow(root, orient="horizontal", bg=BG, bd=0, sashwidth=6,
-                               sashrelief="flat")
+        # ---------- Layout ----------
+        hpane = tk.PanedWindow(root, orient="horizontal", bg=BG, bd=0, sashwidth=6, sashrelief="flat")
         hpane.pack(fill="both", expand=True)
 
-        # ---------- left ----------
-        left = tk.Frame(hpane, bg=PANEL, padx=12, pady=12)
+        left_outer = RoundedFrame(hpane, radius=18, fill=PANEL, outline=PANEL_BORDER, bg=BG)
+        left = left_outer.inner
+        left.config(padx=10, pady=10)
 
         header = tk.Frame(left, bg=PANEL)
-        header.pack(fill="x", pady=(0, 8))
+        header.pack(fill="x", pady=(0, 6))
+        
         labels = tk.Frame(header, bg=PANEL)
         labels.pack(side="left", anchor="n")
-        self.info = tk.Label(labels, text="", font=("Segoe UI", 12), bg=PANEL, fg=MUTED,
-                             anchor="w")
+        self.info = tk.Label(labels, text="", font=("Segoe UI", 12), bg=PANEL, fg=MUTED, anchor="w")
         self.info.pack(fill="x")
-        self.name = tk.Label(labels, text="", font=("Consolas", 15, "bold"), bg=PANEL, fg=FG,
-                             anchor="w")
+        self.name = tk.Label(labels, text="", font=("Consolas", 15, "bold"), bg=PANEL, fg=FG, anchor="w")
         self.name.pack(fill="x")
+        tk.Frame(labels, bg=ACCENT, height=2).pack(fill="x", pady=(4, 0))
 
-        # small GIF slots (right of the number / file name); files come from the "prikol" folder
         os.makedirs(PRIKOL_DIR, exist_ok=True)
         gifs = tk.Frame(header, bg=PANEL, height=GIF_HEIGHT)
-        gifs.pack(side="left", fill="both", expand=True, padx=(14, 0))
+        gifs.pack(side="left", fill="both", expand=True, padx=(10, 0))
         gifs.grid_propagate(False)
         gifs.rowconfigure(0, weight=1)
         self.gif_slots = []
@@ -420,66 +495,60 @@ class App:
             slot.frame.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 6, 0))
             self.gif_slots.append(slot)
 
-        # vertical divider: [ text + buttons ] / [ status + hints + big field ]
-        vpane = tk.PanedWindow(left, orient="vertical", bg=PANEL, bd=0, sashwidth=6,
-                               sashrelief="flat")
+        vpane = tk.PanedWindow(left, orient="vertical", bg=PANEL, bd=0, sashwidth=6, sashrelief="flat")
         vpane.pack(fill="both", expand=True)
 
         top = tk.Frame(vpane, bg=PANEL)
-        self.text = tk.Text(top, width=40, height=8, wrap="word",
+        text_wrap = RoundedFrame(top, radius=12, fill=INPUT_BG, outline=PANEL_BORDER, bg=PANEL, ow=1)
+        text_wrap.pack(fill="both", expand=True)
+        text_wrap.inner.config(padx=0, pady=0)
+        self.text = tk.Text(text_wrap.inner, width=40, height=6, wrap="word",
                             font=("Segoe UI", 20), undo=True, bg=INPUT_BG, fg=FG,
                             insertbackground=FG, selectbackground=ACCENT,
                             selectforeground="white", relief="flat", bd=0,
-                            padx=10, pady=10, highlightthickness=1,
-                            highlightbackground=PANEL_BORDER, highlightcolor=ACCENT)
+                            padx=10, pady=10, highlightthickness=0)
         self.text.pack(fill="both", expand=True)
 
         btns = tk.Frame(top, bg=PANEL)
-        btns.pack(fill="x", pady=(10, 0))
+        btns.pack(fill="x", pady=(8, 0))
         make_button(btns, "Crop (Ctrl+R)", self.apply_crop).pack(side="left", padx=(0, 6))
         make_button(btns, "Original (Ctrl+B)", self.restore_original).pack(side="left", padx=(0, 6))
         make_button(btns, "Deselect (Esc)", self.clear_selection).pack(side="left")
+        make_button(btns, "🗑 Delete", self.delete_current).pack(side="right")
 
         bottom = tk.Frame(vpane, bg=PANEL)
         notes = tk.Frame(bottom, bg=PANEL)
-        notes.pack(side="left", fill="y", anchor="n", pady=(8, 0))
-        self.status = make_copyable(notes, "", ("Segoe UI", 10), MUTED, 2, width=58)
+        notes.pack(side="left", fill="both", expand=True, anchor="n", pady=(6, 0))
+        self.status = make_copyable(notes, "", ("Segoe UI", 10), MUTED, 2, width=40)
         self.status.pack(fill="x")
         self.hints = make_copyable(
             notes,
             "Enter - continue  Spec - ¤  Alt+←/→ - back/forward\n"
             "PgUp/PgDn - ±10    Ctrl+F - search    Ctrl+S - save\n"
             "Ctrl+Wheel - zoom    Ctrl+0 - reset zoom    Wheel / RMB drag - pan\n"
-            "Media slots (folder prikol: images, GIFs, videos): click - next, right click - random\n"
-            "Drag the dividers between the panels to resize them",
-            ("Segoe UI", 9), MUTED, 6, width=58)
-        self.hints.pack(fill="x", pady=(6, 0))
-        make_button(notes, "Commit changes to Git", self.commit_to_git).pack(
-            fill="x", pady=(8, 0)
-        )
+            "🗑 Delete (right button) - deletes line AND file\n"
+            "Media slots: click - next, right click - random",
+            ("Segoe UI", 9), MUTED, 6, width=40)
+        self.hints.pack(fill="both", expand=True, pady=(4, 0))
+        make_button(notes, "💜 Commit & Push to Git", self.commit_to_git).pack(fill="x", pady=(6, 0))
 
-        # big field: works like the small slots (stretches to the whole field)
         self.big_slot = MediaSlot(bottom, self.scan_prikol, self.save_settings, mode=BIG_MODE)
-        self.big_slot.frame.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=(8, 0))
+        self.big_slot.frame.pack(side="right", fill="both", expand=True, padx=(8, 0), pady=(6, 0))
 
-        vpane.add(top, stretch="always", minsize=200)
+        vpane.add(top, stretch="always", minsize=150)
         vpane.add(bottom, stretch="never", minsize=120, height=BIG_HEIGHT)
-        hpane.add(left, stretch="never", minsize=560, width=LEFT_WIDTH)
+        hpane.add(left_outer, stretch="never", minsize=450, width=LEFT_WIDTH)
         self.load_settings()
 
-        # ---------- right panel ----------
-        right_outer = tk.Frame(hpane, bg=BG, padx=8, pady=8)
+        right_outer = RoundedFrame(hpane, radius=18, fill=CANVAS_BG, outline=PANEL_BORDER, bg=BG)
         hpane.add(right_outer, stretch="always", minsize=300)
-        right = tk.Frame(right_outer, bg=CANVAS_BG, highlightthickness=1,
-                         highlightbackground=PANEL_BORDER)
-        right.pack(fill="both", expand=True)
+        right = right_outer.inner
         self.canvas = tk.Canvas(right, bg=CANVAS_BG, highlightthickness=0, cursor="crosshair")
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda e: self.show_image())
         self.canvas.bind("<ButtonPress-1>", self.on_press)
         self.canvas.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
-        # zoom (Ctrl + wheel) and pan (wheel / Shift+wheel / middle or right button drag)
         self.canvas.bind("<Control-MouseWheel>", self.on_zoom_wheel)
         self.canvas.bind("<Control-Button-4>", lambda e: self.zoom_at(e.x, e.y, ZOOM_STEP))
         self.canvas.bind("<Control-Button-5>", lambda e: self.zoom_at(e.x, e.y, 1 / ZOOM_STEP))
@@ -491,7 +560,6 @@ class App:
             self.canvas.bind(f"<ButtonPress-{b}>", self.on_pan_press)
             self.canvas.bind(f"<B{b}-Motion>", self.on_pan_drag)
 
-        # ---------- keys ----------
         self.text.bind("<Return>", self.on_enter)
         root.bind("<Return>", self.on_enter)
         for w in (self.text, root):
@@ -517,43 +585,126 @@ class App:
         self.animate_stars()
         self.load_current()
 
-    # ---------- Starfield background ----------
+    @staticmethod
+    def _shade(rgb, k):
+        k = 0.15 + 0.85 * k
+        return "#%02x%02x%02x" % tuple(int(c * k) for c in rgb)
+
     def init_stars(self):
         self.stars = []
-        for _ in range(80):
+        for _ in range(STAR_COUNT):
+            tint = random.choice([(255, 255, 255), (255, 244, 255), (233, 213, 255),
+                                  (196, 132, 252), (214, 226, 255)])
             self.stars.append({
                 "x": random.random(),
                 "y": random.random(),
-                "size": random.choice([1, 1, 2, 2, 3]),
-                "speed": random.uniform(0.5, 2.0),
-                "color": random.choice(["#ffffff", "#e9d5ff", "#c084fc", "#a855f7", "#7e22ce"]),
+                "r": random.uniform(0.5, 1.7),
+                "speed": random.uniform(0.5, 2.4),
+                "phase": random.uniform(0, 2 * math.pi),
+                "tint": tint,
+                "glow": random.random() < 0.10,
+                "shades": [self._shade(tint, i / (STAR_TWINKLE_SHADES - 1))
+                           for i in range(STAR_TWINKLE_SHADES)],
             })
 
+    def render_space_base(self, w, h):
+        grad = Image.linear_gradient("L").resize((w, h))
+        top = Image.new("RGB", (w, h), (27, 12, 48))
+        bottom = Image.new("RGB", (w, h), (6, 3, 14))
+        base = Image.composite(bottom, top, grad)
+
+        rng = random.Random((w << 16) | h)
+        neb = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        nd = ImageDraw.Draw(neb)
+        palette = [((124, 58, 237), 55), ((76, 29, 149), 65), ((192, 132, 252), 32),
+                   ((49, 18, 92), 72), ((147, 51, 234), 38)]
+        for _ in range(max(7, (w * h) // 85000)):
+            cx, cy = rng.uniform(0, w), rng.uniform(0, h)
+            rx = rng.uniform(0.08, 0.30) * w
+            ry = rx * rng.uniform(0.35, 0.85)
+            col, amax = palette[rng.randrange(len(palette))]
+            nd.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=col + (rng.randint(amax // 3, amax),))
+        neb = neb.filter(ImageFilter.GaussianBlur(min(w, h) // 8))
+        base = Image.alpha_composite(base.convert("RGBA"), neb).convert("RGB")
+
+        self.space_base = (w, h, base)
+        self.space_photo = ImageTk.PhotoImage(base)
+
     def draw_starfield(self, width, height):
-        for i, star in enumerate(self.stars):
-            alpha = (math.sin(self.star_phase * star["speed"] + i) + 1) / 2
-            if alpha < 0.2:
+        self.canvas.delete("stars")
+        s = max(0.6, min(width, height) / 800.0)
+
+        # Определяем координаты отображаемой картинки на холсте (если она есть)
+        img_box = None
+        if self.img_size[0] > 0 and self.img_size[1] > 0:
+            W, H = self.img_size
+            img_w = W * self.eff_scale
+            img_h = H * self.eff_scale
+            # Добавим небольшой отступ (например, 4 пикселя), чтобы звёзды не липли вплотную к краям картинки
+            pad = 4
+            img_box = (self.ox - pad, self.oy - pad, self.ox + img_w + pad, self.oy + img_h + pad)
+
+        for st in self.stars:
+            x, y = st["x"] * width, st["y"] * height
+
+            # Если звезда попадает внутрь области картинки — пропускаем её отрисовку
+            if img_box and img_box[0] <= x <= img_box[2] and img_box[1] <= y <= img_box[3]:
                 continue
-            x, y = star["x"] * width, star["y"] * height
-            size = star["size"]
-            color = star["color"]
-            if size == 1:
-                self.canvas.create_rectangle(x, y, x + 1, y + 1, fill=color, outline="")
-            else:
-                self.canvas.create_oval(x - size, y - size, x + size, y + size,
-                                         fill=color, outline="")
+
+            r = max(0.6, st["r"] * s)
+            k = (math.sin(self.star_phase * st["speed"] + st["phase"]) + 1) / 2
+            idx = int(k * (STAR_TWINKLE_SHADES - 1))
+            if st["glow"]:
+                gr = r * 3.4
+                self.canvas.create_oval(x - gr, y - gr, x + gr, y + gr,
+                                        fill=st["shades"][max(0, idx - 4)],
+                                        outline="", tags="stars")
+            self.canvas.create_oval(x - r, y - r, x + r, y + r,
+                                    fill=st["shades"][idx], outline="", tags="stars")
+
+        for m in self.meteors:
+            x0 = m["x"] - m["vx"] * 0.45
+            y0 = m["y"] - m["vy"] * 0.45
+            # Падающие звезды тоже не рисуем поверх картинки
+            if img_box and img_box[0] <= m["x"] <= img_box[2] and img_box[1] <= m["y"] <= img_box[3]:
+                continue
+            fade = min(1.0, m["life"] * 2)
+            self.canvas.create_line(m["x"], m["y"], x0, y0,
+                                    fill="#7e22ce", width=2,
+                                    stipple="gray50" if fade < 0.8 else "",
+                                    tags="stars")
+            self.canvas.create_line(m["x"], m["y"], (m["x"] + x0) / 2, (m["y"] + y0) / 2,
+                                    fill="#f3e8ff", width=2, tags="stars")
 
     def animate_stars(self):
-        self.star_phase += 0.08
+        self.star_phase += 0.12
+        now = time.perf_counter()
+        cw = max(self.canvas.winfo_width(), 50)
+        ch = max(self.canvas.winfo_height(), 50)
+        if now > self.next_meteor and len(self.meteors) < 2:
+            self.meteors.append({
+                "x": random.uniform(0.25, 1.05) * cw,
+                "y": random.uniform(0.0, 0.35) * ch,
+                "vx": -random.uniform(0.10, 0.22) * cw,
+                "vy": random.uniform(0.05, 0.12) * ch,
+                "life": random.uniform(0.6, 1.2),
+            })
+            self.next_meteor = now + random.uniform(6, 15)
+        dt = 0.08
+        for m in self.meteors:
+            m["x"] += m["vx"] * dt
+            m["y"] += m["vy"] * dt
+            m["life"] -= dt
+        self.meteors = [m for m in self.meteors
+                        if m["life"] > 0 and m["x"] > -100 and m["y"] < ch + 100]
         if self.canvas.winfo_exists():
-            self.show_image()
+            self.draw_starfield(cw, ch)
             self.root.after(80, self.animate_stars)
 
-    # ---------- status ----------
-    def set_status(self, text):
+    def set_status(self, text, color=None):
         set_readonly_text(self.status, text)
+        self.status.config(fg=color if color else MUTED)
 
-    # ---------- settings (GIF slots) ----------
     def scan_prikol(self):
         try:
             return sorted(p for p in Path(PRIKOL_DIR).iterdir()
@@ -592,7 +743,6 @@ class App:
             pass
         self.text.focus_set()
 
-    # ---------- data ----------
     def load_progress(self):
         try:
             with open(PROGRESS_PATH, encoding="utf-8") as f:
@@ -609,6 +759,8 @@ class App:
             pass
 
     def commit_text(self):
+        if not self.rows:
+            return
         new = self.text.get("1.0", "end-1c").replace("\n", " ").strip()
         if new != self.rows[self.idx][1]:
             self.rows[self.idx][1] = new
@@ -630,10 +782,11 @@ class App:
         os.replace(tmp, CSV_PATH)
         self.dirty = False
         changed = sum(1 for a, r in zip(self.original, self.rows) if a != r[1])
-        self.set_status(f"Saved. Changed lines: {changed}")
+        self.set_status(f"Saved. Changed lines: {changed}", OK_COLOR)
 
-    # ---------- show ----------
     def current_path(self):
+        if not self.rows:
+            return os.path.join(FOLDER, "")
         return os.path.join(FOLDER, self.rows[self.idx][0])
 
     def reset_view(self):
@@ -642,6 +795,17 @@ class App:
         self.view_oy = None
 
     def load_current(self):
+        if not self.rows:
+            self.info.config(text="0 / 0")
+            self.name.config(text="—")
+            self.text.delete("1.0", "end")
+            self.text.edit_reset()
+            self.sel = None
+            self.sel_start = None
+            self.reset_view()
+            self.show_image()
+            self.save_progress()
+            return
         fn, txt = self.rows[self.idx]
         self.info.config(text=f"{self.idx + 1} / {len(self.rows)}")
         cropped = os.path.exists(os.path.join(ORIG_DIR, fn))
@@ -658,6 +822,8 @@ class App:
         self.save_progress()
 
     def get_image(self):
+        if not self.rows:
+            return None
         path = self.current_path()
         if not os.path.exists(path):
             return None
@@ -669,10 +835,11 @@ class App:
         return im
 
     def layout(self):
-        """Compute image position / scale on the canvas for the current zoom."""
         cw = max(self.canvas.winfo_width(), 50)
         ch = max(self.canvas.winfo_height(), 50)
         W, H = self.img_size
+        if W == 0 or H == 0:
+            return cw, ch
         base = max(min((cw - 20) / W, (ch - 20) / H, 3.0), 0.01)
         s = base * self.zoom
         w, h = W * s, H * s
@@ -690,22 +857,34 @@ class App:
         return cw, ch
 
     def show_image(self):
-        self.canvas.delete("all")
+        self.canvas.delete("img", "msg", "sel")
         self.sel_id = None
         cw = max(self.canvas.winfo_width(), 50)
         ch = max(self.canvas.winfo_height(), 50)
-        self.draw_starfield(cw, ch)
+        if self._bg_key != (cw, ch):
+            self.canvas.delete("bg", "stars")
+            self.render_space_base(cw, ch)
+            self.canvas.create_image(0, 0, image=self.space_photo, anchor="nw", tags="bg")
+            self._bg_key = (cw, ch)
+        
         im = self.get_image()
-        if im is None:
+        if im is not None:
+            self.img_size = im.size
+        else:
             self.img_size = (0, 0)
-            self.canvas.create_text(cw // 2, ch // 2, text=f"No file:\n{self.current_path()}",
-                                    font=("Segoe UI", 14), fill="#ff6b6b")
+
+        # Сначала рассчитываем положение картинки, чтобы звёзды учитывали её актуальные границы
+        self.layout()
+        self.draw_starfield(cw, ch)
+
+        if im is None:
+            text = "All entries deleted 🌌" if not self.rows else f"No file:\n{self.current_path()}"
+            self.canvas.create_text(cw // 2, ch // 2, text=text,
+                                    font=("Segoe UI", 14), fill=ERR_COLOR, tags="msg")
             return
-        self.img_size = im.size
+
         W, H = im.size
-        cw, ch = self.layout()
         s, ox, oy = self.eff_scale, self.ox, self.oy
-        # render only the visible part of the image
         xi0 = max(0, int(-ox / s))
         yi0 = max(0, int(-oy / s))
         xi1 = min(W, int((cw - ox) / s) + 2)
@@ -716,10 +895,9 @@ class App:
             part = part.resize(size, RESAMPLE)
             self.photo = ImageTk.PhotoImage(part)
             self.canvas.create_image(int(round(ox + xi0 * s)), int(round(oy + yi0 * s)),
-                                     image=self.photo, anchor="nw")
+                                     image=self.photo, anchor="nw", tags="img")
         self.draw_selection()
 
-    # ---------- zoom / pan ----------
     def zoom_at(self, cx, cy, factor):
         if self.img_size[0] == 0:
             return "break"
@@ -777,7 +955,6 @@ class App:
         self.view_oy = oy0 + (e.y - sy)
         self.show_image()
 
-    # ---------- selection / crop ----------
     def to_img(self, x, y):
         W, H = self.img_size
         ix = min(max((x - self.ox) / self.eff_scale, 0), W)
@@ -820,7 +997,7 @@ class App:
             x0, y0, x1, y1 = self.sel
             self.sel_id = self.canvas.create_rectangle(
                 self.ox + x0 * s, self.oy + y0 * s, self.ox + x1 * s, self.oy + y1 * s,
-                outline=SEL_COLOR, width=2, dash=(5, 3))
+                outline=SEL_COLOR, width=2, dash=(5, 3), tags="sel")
 
     def clear_selection(self):
         self.sel = None
@@ -828,8 +1005,10 @@ class App:
         self.draw_selection()
 
     def apply_crop(self):
+        if not self.rows:
+            return
         if not self.sel:
-            self.set_status("First, select an area on the image using your mouse.")
+            self.set_status("First, select an area on the image using your mouse.", ERR_COLOR)
             return
         path = self.current_path()
         if not os.path.exists(path):
@@ -840,7 +1019,7 @@ class App:
         x1 = min(W, int(round(self.sel[2])))
         y1 = min(H, int(round(self.sel[3])))
         if x1 - x0 < 5 or y1 - y0 < 5:
-            self.set_status("Area too small")
+            self.set_status("Area too small", ERR_COLOR)
             return
         os.makedirs(ORIG_DIR, exist_ok=True)
         backup = os.path.join(ORIG_DIR, self.rows[self.idx][0])
@@ -848,17 +1027,19 @@ class App:
             shutil.copy2(path, backup)
         im = Image.open(path)
         im.crop((x0, y0, x1, y1)).save(path)
-        self.set_status(f"Cropped: {x1 - x0}x{y1 - y0} px (original in _originals)")
+        self.set_status(f"Cropped: {x1 - x0}x{y1 - y0} px (original in _originals)", OK_COLOR)
         self.sel = None
         self.reset_view()
         self.name.config(text=self.rows[self.idx][0] + "   [cropped]")
         self.show_image()
 
     def restore_original(self):
+        if not self.rows:
+            return
         fn = self.rows[self.idx][0]
         backup = os.path.join(ORIG_DIR, fn)
         if not os.path.exists(backup):
-            self.set_status("There is no saved original for this image")
+            self.set_status("There is no saved original for this image", ERR_COLOR)
             return
         shutil.copy2(backup, self.current_path())
         os.remove(backup)
@@ -866,12 +1047,57 @@ class App:
         self.sel = None
         self.reset_view()
         self.show_image()
-        self.set_status("Original restored")
+        self.set_status("Original restored", OK_COLOR)
 
+    def delete_current(self):
+        if not self.rows:
+            self.set_status("Nothing to delete", ERR_COLOR)
+            return
+        fn = self.rows[self.idx][0]
+        if not messagebox.askyesno("Delete", f"Delete the entry and the file?\n\n{fn}"):
+            return
+        path = self.current_path()
+        try:
+            if os.path.exists(path) and os.path.isfile(path):
+                os.remove(path)
+        except Exception as ex:
+            messagebox.showerror("Delete", f"Could not delete the file:\n{ex}")
+            return
+        backup = os.path.join(ORIG_DIR, fn)
+        if os.path.exists(backup):
+            try:
+                os.remove(backup)
+            except Exception:
+                pass
+        del self.rows[self.idx]
+        del self.original[self.idx]
+        self._cache = None
+        self.sel = None
+        self.dirty = True
+        self.save()
+        if self.rows:
+            self.idx = min(self.idx, len(self.rows) - 1)
+        else:
+            self.idx = 0
+        self.load_current()
+        self.set_status(f"Deleted: {fn}" + ("" if self.rows else ". The list is empty."),
+                        OK_COLOR)
 
-    # ---------- Git commit ----------
+    def git_push(self, repo_root):
+        push = subprocess.run([GIT_EXE, "push"], cwd=str(repo_root),
+                              capture_output=True, text=True)
+        if push.returncode == 0:
+            return None
+        branch = subprocess.run([GIT_EXE, "rev-parse", "--abbrev-ref", "HEAD"],
+                                cwd=str(repo_root), capture_output=True,
+                                text=True).stdout.strip() or "main"
+        push = subprocess.run([GIT_EXE, "push", "-u", "origin", branch],
+                              cwd=str(repo_root), capture_output=True, text=True)
+        if push.returncode == 0:
+            return None
+        return (push.stderr or push.stdout or "git push failed").strip()
+
     def commit_to_git(self):
-        """Save labels and commit dataset changes without exceeding Windows command length."""
         global GIT_EXE
 
         if not GIT_EXE or not os.path.isfile(GIT_EXE):
@@ -898,7 +1124,6 @@ class App:
                 return
 
         try:
-            # Определяем корень Git-репозитория.
             result = subprocess.run(
                 [GIT_EXE, "rev-parse", "--show-toplevel"],
                 cwd=str(BASE),
@@ -909,11 +1134,9 @@ class App:
 
             repo_root = Path(result.stdout.strip()).resolve()
 
-            # Пути относительно корня репозитория.
             csv_relative = CSV_PATH.resolve().relative_to(repo_root).as_posix()
             images_relative = FOLDER.resolve().relative_to(repo_root).as_posix()
 
-            # Исключаем резервные копии и файлы состояния программы.
             pathspecs = [
                 csv_relative,
                 images_relative + "/",
@@ -922,7 +1145,6 @@ class App:
                 f":(exclude){images_relative}/.verify_settings.json",
             ]
 
-            # Добавляем изменения в Git без передачи тысяч отдельных путей.
             subprocess.run(
                 [GIT_EXE, "add", "-A", "--", *pathspecs],
                 cwd=str(repo_root),
@@ -931,7 +1153,6 @@ class App:
                 check=True
             )
 
-            # Проверяем, появились ли изменения.
             changed = subprocess.run(
                 [GIT_EXE, "diff", "--cached", "--quiet", "--", *pathspecs],
                 cwd=str(repo_root),
@@ -948,7 +1169,6 @@ class App:
                     changed.stderr or "Не удалось проверить изменения Git"
                 )
 
-            # Получаем историю коммитов и определяем следующую версию.
             history = subprocess.run(
                 [GIT_EXE, "log", "--all", "--format=%s"],
                 cwd=str(repo_root),
@@ -971,14 +1191,12 @@ class App:
 
             version += 1
 
-            # Создаём сообщение коммита.
-            current_file = self.rows[self.idx][0]
+            current_file = self.rows[self.idx][0] if self.rows else "end"
 
             commit_message = (
                 f"real data 0.{version} checked till {current_file}"
             )
 
-            # Создаём коммит.
             commit = subprocess.run(
                 [
                     GIT_EXE,
@@ -1000,10 +1218,21 @@ class App:
 
             self.set_status(f"Committed: {commit_message}")
 
-            messagebox.showinfo(
-                "Git commit",
-                f"Коммит создан успешно:\n\n{commit_message}"
-            )
+            push_error = self.git_push(repo_root)
+
+            if push_error is None:
+                self.set_status(f"Committed & pushed: {commit_message}", OK_COLOR)
+                messagebox.showinfo(
+                    "Git commit",
+                    f"Коммит создан и успешно отправлен (push) в репозиторий:\n\n{commit_message}"
+                )
+            else:
+                self.set_status(f"Committed (push failed): {commit_message}", ERR_COLOR)
+                messagebox.showwarning(
+                    "Git commit",
+                    f"Коммит создан, но автоматический push не удался:\n\n{push_error}\n\n"
+                    f"Проверьте настройки remote (git remote -v, авторизацию)."
+                )
 
         except subprocess.CalledProcessError as ex:
             details = (ex.stderr or ex.stdout or str(ex)).strip()
@@ -1020,8 +1249,7 @@ class App:
 
         except Exception as ex:
             messagebox.showerror("Git commit", str(ex))
-        
-    # ---------- key handlers ----------
+
     def on_save_key(self, e):
         self.save()
         return "break"
@@ -1039,6 +1267,8 @@ class App:
         return "break"
 
     def go(self, step):
+        if not self.rows:
+            return "break"
         self.commit_text()
         new = min(max(self.idx + step, 0), len(self.rows) - 1)
         if new != self.idx:
@@ -1047,6 +1277,8 @@ class App:
         return "break"
 
     def on_enter(self, event):
+        if not self.rows:
+            return "break"
         self.commit_text()
         if self.dirty:
             self.save()
@@ -1058,6 +1290,8 @@ class App:
         return "break"
 
     def undo_line(self, event):
+        if not self.rows:
+            return "break"
         self.text.delete("1.0", "end")
         self.text.insert("1.0", self.original[self.idx])
         return "break"
@@ -1088,7 +1322,7 @@ class App:
             if target is None and q.isdigit() and 1 <= int(q) <= len(self.rows):
                 target = int(q) - 1
             if target is None:
-                self.set_status("String not found")
+                self.set_status("String not found", ERR_COLOR)
             else:
                 self.commit_text()
                 self.idx = target
