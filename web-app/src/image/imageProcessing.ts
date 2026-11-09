@@ -84,19 +84,19 @@ export function drawRotated(
   ctx.restore();
 }
 
-/** Produces the JPEG (max 1920 x 1080) that is sent for recognition. */
+/** Produces the PNG (max 1920 x 1080) that is sent for recognition. */
 export async function prepareImageForRecognition(
   image: LoadedImage,
   rotation: Rotation,
-  options: { maxLongSide: number; maxShortSide: number; jpegQuality: number },
+  options: { maxLongSide: number; maxShortSide: number; pngQuality: number },
 ): Promise<Blob> {
   const canvas = document.createElement('canvas');
   try {
     drawRotated(canvas, image, rotation, options.maxLongSide, options.maxShortSide);
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/jpeg', options.jpegQuality),
+      canvas.toBlob(resolve, 'image/png', options.pngQuality),
     );
-    if (!blob || blob.size === 0) throw new AppError('IMAGE_PROCESSING_FAILED', 'Empty JPEG');
+    if (!blob || blob.size === 0) throw new AppError('IMAGE_PROCESSING_FAILED', 'Empty PNG');
     return blob;
   } catch (error) {
     if (error instanceof AppError) throw error;
