@@ -1,6 +1,9 @@
 /*
-  websites visual part, idea of the text book where the 
-  image is located
+  LVRA visual system
+  Idea: the work area is a Latvian school exercise book ("rūtiņu burtnīca"):
+  a light blue square grid with a red margin line. The result text sits on
+  ruled lines. Everything else stays quiet. System fonts only, so no
+  third-party font requests leave the user's browser.
 */
 
 :root {
@@ -290,3 +293,20 @@ mark.uncertain {
 @media (prefers-reduced-motion: reduce) {
   .ink-line { animation: none; background: var(--ink); }
 }
+
+/* Terms window */
+.terms .effective, .privacy .effective { margin: -0.4rem 0 0.5rem; font-size: 0.9rem; color: var(--muted); }
+.privacy p + p { margin-top: 0.5rem; }
+.terms-current { margin-top: 1rem !important; padding: 0.6rem 0.8rem; background: #eaf0fb; border-left: 4px solid var(--ink); font-size: 0.95rem; }
+.terms-actions .btn-primary { flex: 1 1 14rem; }
+.footer-links { display: inline-flex; flex-wrap: wrap; gap: 1rem; }
+
+/* Developer panel: last request */
+.devpanel fieldset { border: 0; padding: 0; margin: 0.6rem 0 0; }
+.devpanel legend { font-weight: 600; padding: 0; }
+.devpanel label.inline { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
+.devpanel h3 { font-size: 1rem; margin: 1rem 0 0.25rem; }
+.devlines { margin: 0.25rem 0; padding-left: 0; list-style: none; display: grid; gap: 0.4rem; }
+.devlines li { display: grid; grid-template-columns: 5.5rem 1fr; align-items: center; gap: 0.5rem; }
+.devlines img { max-width: 100%; height: auto; border: 1px solid var(--rule); background: #fff; }
+.devpanel pre { margin: 0.25rem 0; padding: 0.5rem; background: #f4f6fa; overflow-x: auto; font-size: 0.85rem; white-space: pre; }

@@ -1,0 +1,7 @@
+# Python packages for the LVRA server (web-app/server/app.py).
+# Install on PythonAnywhere in a Bash console:
+#   pip3.10 install --user -r ~/LVRA/web-app/requirements.txt
+# PyTorch is NOT needed: the model runs with numpy (server/htr_numpy.py).
+Flask>=2.3
+numpy>=1.24
+Pillow>=9.5
