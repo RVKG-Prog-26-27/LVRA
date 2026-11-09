@@ -20,15 +20,15 @@ LATVIAN_LETTERS = "aābcčdeēfgģhiījkķlļmnņoprsštuūvzž"
 BASE_LATIN = "qwxy"
 DIGITS = "0123456789"
 PUNCT = (
-    " .,!?-:;()\"'/"                   # basic punctuation and the space
-    + "„“”‘’"  # Latvian and curly quotes
-    + "\u2013\u2014"                    # en and em dash
-    + "[]{}"                            # brackets
-    + "«»"                    # angle quotes
-    + "*_+=<>@#%&^~|\\"                 # symbols
-    + "…"                          # ellipsis
-    + "№"                          # numero sign
-    + "€$"                         # euro and dollar
+    " .,!?-:;()\"'/•"                        # pamata pieturzīmes
+    + "\u201e\u201c\u201d\u2018\u2019"       # „ " " ' ' (latviešu/izliektas pēdiņas)
+    + "\u2013\u2014"                         # – – (defise en un em)
+    + "[]{}"                                 # iekavas 
+    + "«»"                                   # eglītes
+    + "*_+=<>@#%&^~|\\"                      # simboli
+    + "\u2026"                               # … 
+    + "\u2116"                               # № 
+    + "€$"                                   # valūta 
 )
 
 CHARS = sorted(set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + PUNCT))
