@@ -1,5 +1,5 @@
 # LVRA — Latviešu valodas rokraksta atpazīšana
-GIT_EXE = r"C:\Program Files\Git\cmd\git.exe"
+
 **LVRA** ir eksperimentāla sistēma, kas no rokrakstā rakstīta latviešu teksta attēla iegūst rediģējamu digitālu tekstu. Projektu veido divas daļas:
 
 | Daļa | Mape | Tehnoloģijas | Uzdevums |
