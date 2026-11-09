@@ -85,8 +85,44 @@ def load_state_dict(path):
             return np.frombuffer(archive.read(f"{prefix}data/{key}"), dtype=dtype)
 
     with archive.open(pkl_name) as f:
-        state = Unpickler(f).load()
-    return {k: np.asarray(v, dtype=np.float32) if v.dtype != np.int64 else v for k, v in state.items()}
+        content = Unpickler(f).load()
+    state = _find_weights(content)
+    if state is None:
+        raise RuntimeError(f"No model weights (rnn.fc.weight) found in {path}")
+    return {
+        k: (v if v.dtype == np.int64 else np.asarray(v, dtype=np.float32))
+        for k, v in state.items()
+        if isinstance(v, np.ndarray)
+    }
+
+
+_WEIGHT_KEY = "rnn.fc.weight"
+
+
+def _find_weights(obj):
+    """
+    Finds the model weights in a checkpoint.
+
+    A checkpoint can be saved in two ways:
+      torch.save(model.state_dict(), ...)          the file is the weights
+      torch.save({"model": model.state_dict(),     the weights are inside a
+                  "step": ..., "optimizer": ...})   package with other things
+    The package keys differ between projects ("model", "state_dict",
+    "model_state_dict", ...), so the weights are found by looking for the
+    dictionary that holds the layer "rnn.fc.weight". Prefixes that PyTorch
+    adds in some setups ("module.", "_orig_mod.") are removed.
+    """
+    if not isinstance(obj, dict):
+        return None
+    for key in obj:
+        if isinstance(key, str) and key.endswith(_WEIGHT_KEY):
+            prefix = key[: -len(_WEIGHT_KEY)]
+            return {k[len(prefix):]: v for k, v in obj.items() if isinstance(k, str) and k.startswith(prefix)}
+    for value in obj.values():
+        found = _find_weights(value)
+        if found is not None:
+            return found
+    return None
 
 
 # ---------------------------------------------------------------- layers
