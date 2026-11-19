@@ -1,15 +1,21 @@
 """
-The character table and CTC decoding, copied from latvian_htr/alphabet.py.
+The character tables and CTC decoding, copied from latvian_htr/alphabet.py.
 
 Why a copy: latvian_htr/alphabet.py imports PyTorch, and PyTorch does not
-fit on the free PythonAnywhere plan. This file has the same table and the
+fit on the free PythonAnywhere plan. This file has the same tables and the
 same decoding, without PyTorch.
 
-KEEP IN SYNC: if the AI side changes LATVIAN_LETTERS, BASE_LATIN, DIGITS or
-PUNCT or STRIKE_MARK in latvian_htr/alphabet.py, make the same change here. Otherwise the
-numbers no longer mean the same letters. If the number of characters does
-not match the model file, the server refuses to start recognising and
-writes the reason to the error log.
+Two tables are kept, because checkpoints exist for both:
+  137 classes  the current latvian_htr/alphabet.py (crnn_best_migrated.pt and newer)
+  131 classes  the earlier alphabet, latvian_htr/old_alphabet.py (crnn_best.pt)
+The server counts the rows of the model's last layer (rnn.fc.weight) and
+picks the table with that many classes, so either kind of checkpoint reads
+the right letters. A checkpoint with any other count is refused with a clear
+message in the error log.
+
+KEEP IN SYNC: if the AI side changes LATVIAN_LETTERS, BASE_LATIN, DIGITS,
+PUNCT or STRIKE_MARK in latvian_htr/alphabet.py, update CURRENT_PUNCT (or add
+a new table) here. Otherwise the numbers no longer mean the same letters.
 
 The en and em dash are written as \\u escapes so the source file does not contain those characters.
 """
@@ -19,35 +25,60 @@ import math
 LATVIAN_LETTERS = "aābcčdeēfgģhiījkķlļmnņoprsštuūvzž"
 BASE_LATIN = "qwxy"
 DIGITS = "0123456789"
-PUNCT = (
-    " .,!?-:;()\"'/•"                        # pamata pieturzīmes
-    + "\u201e\u201c\u201d\u2018\u2019"       # „ " " ' ' (latviešu/izliektas pēdiņas)
+
+_PUNCT_TAIL = (
+    "\u201e\u201c\u201d\u2018\u2019"         # „ " " ' ' (latviešu/izliektas pēdiņas)
     + "\u2013\u2014"                         # defise en un em
-    + "[]{}"                                 # iekavas 
+    + "[]{}"                                 # iekavas
     + "«»"                                   # eglītes
     + "*_+=<>@#%&^~|\\"                      # simboli
-    + "\u2026"                               # … 
-    + "\u2116"                               # № 
-    + "€$"                                   # valūta 
+    + "\u2026"                               # …
+    + "\u2116"                               # №
+    + "€$"                                   # valūta
 )
+
+# latvian_htr/alphabet.py now (137 classes): the basic punctuation plus ° ≈ ö Ç ü Ć
+CURRENT_PUNCT = " .,!?-:;()\"'/•°≈öÇöüĆ" + _PUNCT_TAIL
+# latvian_htr/old_alphabet.py (131 classes), the table crnn_best.pt was trained with
+OLD_PUNCT = " .,!?-:;()\"'/•" + _PUNCT_TAIL
 
 # The model writes this mark in place of one crossed-out word (same as alphabet.STRIKE_MARK).
 STRIKE_MARK = "\u00a4"
-
-CHARS = sorted(set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + PUNCT + STRIKE_MARK))
 BLANK = "<blank>"
-ALPHABET = [BLANK] + CHARS
-IDX_TO_CHAR = {i: c for i, c in enumerate(ALPHABET)}
+
+
+def _build(punct):
+    chars = sorted(
+        set(LATVIAN_LETTERS + LATVIAN_LETTERS.upper() + BASE_LATIN + BASE_LATIN.upper() + DIGITS + punct + STRIKE_MARK)
+    )
+    return [BLANK] + chars
+
+
+ALPHABETS = {len(a): a for a in (_build(CURRENT_PUNCT), _build(OLD_PUNCT))}
+
+# The current table (same as latvian_htr/alphabet.py).
+ALPHABET = _build(CURRENT_PUNCT)
 NUM_CLASSES = len(ALPHABET)
 
 
-def decode_greedy(indices):
+def alphabet_for(num_classes):
+    """The table with num_classes entries, or a clear error if the server has none."""
+    if num_classes not in ALPHABETS:
+        known = ", ".join(str(n) for n in sorted(ALPHABETS))
+        raise RuntimeError(
+            f"The checkpoint has {num_classes} classes, but the server only knows tables with {known}. "
+            "Update server/alphabet_table.py to match latvian_htr/alphabet.py."
+        )
+    return ALPHABETS[num_classes]
+
+
+def decode_greedy(indices, alphabet=ALPHABET):
     """Same as alphabet.decode_greedy: merge repeats, drop blanks (index 0)."""
     out = []
     prev = None
     for idx in indices:
         if idx != prev and idx != 0:
-            out.append(IDX_TO_CHAR[idx])
+            out.append(alphabet[idx])
         prev = idx
     return "".join(out)
 
@@ -63,10 +94,10 @@ def _log_add(a, b):
     return a + math.log1p(math.exp(b - a))
 
 
-def decode_beam_search(log_probs, beam_width=5, prune=12.0):
+def decode_beam_search(log_probs, beam_width=5, prune=12.0, alphabet=ALPHABET):
     """
     Same algorithm as alphabet.decode_beam_search (CTC prefix beam search),
-    for a numpy array log_probs [T, C].
+    for a numpy array log_probs [T, C]. alphabet must have C entries.
 
     One addition for speed: at each step only characters whose log
     probability is within `prune` of that step's best are tried (12 means
@@ -74,6 +105,8 @@ def decode_beam_search(log_probs, beam_width=5, prune=12.0):
     reach the 5 best guesses, so the result is the same while recognition is
     many times faster on the server.
     """
+    if log_probs.shape[1] != len(alphabet):
+        raise ValueError(f"Model gives {log_probs.shape[1]} classes, the table has {len(alphabet)}")
     neg_inf = -math.inf
     beams = {(): (0.0, neg_inf)}  # prefix -> (log p ending in blank, log p ending in a character)
 
@@ -104,10 +137,10 @@ def decode_beam_search(log_probs, beam_width=5, prune=12.0):
         )
 
     best_prefix = max(beams, key=lambda prefix: _log_add(beams[prefix][0], beams[prefix][1]))
-    return "".join(IDX_TO_CHAR[i] for i in best_prefix)
+    return "".join(alphabet[i] for i in best_prefix)
 
 
 def strip_struck(text):
     """Same as alphabet.strip_struck: removes the crossed-out word marks and tidies the spaces.
-    "Ekonomika \u00a4 tirgus" -> "Ekonomika tirgus" """
+    "Ekonomika ¤ tirgus" -> "Ekonomika tirgus" """
     return " ".join(text.replace(STRIKE_MARK, " ").split())
