@@ -7,7 +7,7 @@ layer with numpy. It reads the same checkpoint files (.pt) that
 latvian_htr/train.py saves and gives the same output as latvian_htr/infer.py.
 
 Nothing in latvian_htr is changed. The server only reads the trained
-weights (latvian_htr/checkpoints_v2/*.pt). The character table is in
+weights (latvian_htr/checkpoints_v2/*.pt). The character tables are in
 alphabet_table.py, a copy without PyTorch.
 
 KEEP IN SYNC with latvian_htr:
@@ -16,7 +16,8 @@ KEEP IN SYNC with latvian_htr:
                     which save_checkpoint() puts into the checkpoint package)
   synthetic_data.py TARGET_HEIGHT
   dataset.py / infer.py  how a line image is prepared (prepare_line below)
-  alphabet.py       alphabet_table.py
+  alphabet.py       alphabet_table.py (the table is picked by the number of classes
+                    in the checkpoint: 137 now, 131 for the older crnn_best.pt)
 If model.py changes, loading the checkpoint fails with a clear message in
 the error log instead of returning wrong text.
 """
@@ -29,7 +30,7 @@ import zipfile
 import numpy as np
 from PIL import Image, ImageOps
 
-from alphabet_table import NUM_CLASSES, decode_beam_search
+from alphabet_table import alphabet_for, decode_beam_search
 
 TARGET_HEIGHT = 64  # same as latvian_htr/synthetic_data.py
 BEAM_WIDTH = 5  # same default as latvian_htr/infer.py
@@ -188,7 +189,13 @@ def _lstm_direction(x, w_ih, w_hh, b_ih, b_hh, reverse):
 
 
 def check_architecture(sd):
-    """Fails with a clear message if the checkpoint does not fit the layers below."""
+    """
+    Fails with a clear message if the checkpoint does not fit the layers below.
+    Returns the character table that matches the checkpoint (131 or 137 classes,
+    see alphabet_table.py).
+    """
+    num_classes = sd["rnn.fc.weight"].shape[0] if "rnn.fc.weight" in sd else None
+    alphabet = alphabet_for(num_classes)
     expected = {
         "cnn.net.0.weight": (64, 1, 3, 3),
         "cnn.net.3.weight": (128, 64, 3, 3),
@@ -198,7 +205,7 @@ def check_architecture(sd):
         "cnn.net.14.weight": (512, 512, 3, 3),
         "cnn.net.18.weight": (512, 512, 4, 1),
         "rnn.lstm.weight_ih_l0": (1024, 512),
-        "rnn.fc.weight": (NUM_CLASSES, 512),
+        "rnn.fc.weight": (len(alphabet), 512),
     }
     for key, shape in expected.items():
         if key not in sd or tuple(sd[key].shape) != shape:
@@ -207,6 +214,7 @@ def check_architecture(sd):
                 f"Checkpoint does not match the server's copy of the model: {key} is {found}, expected {shape}. "
                 "Update server/htr_numpy.py (and alphabet_table.py) to match latvian_htr."
             )
+    return alphabet
 
 
 def forward(sd, image, x_stride=2):
@@ -263,13 +271,14 @@ class Recognizer:
         self.checkpoint_path = checkpoint_path
         self._weights = None
         self._x_stride = 2
+        self._alphabet = None
         self._lock = threading.Lock()
 
     def _ensure_loaded(self):
         with self._lock:
             if self._weights is None:
                 weights, x_stride = load_checkpoint(self.checkpoint_path)
-                check_architecture(weights)
+                self._alphabet = check_architecture(weights)
                 self._x_stride = x_stride
                 self._weights = weights
 
@@ -285,4 +294,4 @@ class Recognizer:
         """
         self._ensure_loaded()
         log_probs = forward(self._weights, prepare_line(img), self._x_stride)
-        return decode_beam_search(log_probs, beam_width=BEAM_WIDTH).strip()
+        return decode_beam_search(log_probs, beam_width=BEAM_WIDTH, alphabet=self._alphabet).strip()
