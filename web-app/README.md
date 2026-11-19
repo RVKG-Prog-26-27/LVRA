@@ -1,10 +1,8 @@
 # LVRA, Latvijas Valodas Rokraksta Atpazīšana
 
-A responsive web app (phone first) that turns a photo of handwritten Latvian text into digital text the user can read, correct and copy. Made by the Slepie team.
+A responsive web app (phone first) that turns a photo of handwritten Latvian text into digital text the user can read, correct and copy. Made by the Konstantins.
 
-The user interface is entirely in Latvian. This documentation is in English for developers.
-
-> **Version 0.2.** The web app and the AI run together on PythonAnywhere (EU). The AI is the CRNN model from `../latvian_htr` (`checkpoints_v2/crnn_step30000.pt`), run with numpy. It reads computer-drawn handwriting fonts almost perfectly but real handwriting mostly wrongly, so users see the notice "AI vēl mācās, tāpēc atpazītais teksts var būt neprecīzs."
+> **Version 0.2.** The web app and the AI run together on PythonAnywhere (EU). The AI is the CRNN model from `../latvian_htr` (`checkpoints_v2/crnn_step30000.pt`), run with numpy.
 
 ## User flow
 
@@ -20,13 +18,13 @@ The user interface is entirely in Latvian. This documentation is in English for 
 
 ```
 LVRA/
-  latvian_htr/            the AI (training code, checkpoints). Not changed by the web app.
+  latvian_htr/            the AI (training code, checkpoints).
   web-app/
     src/                  the website (React + TypeScript)
     server/app.py         Flask server: serves the website and the AI endpoint
-    server/htr_numpy.py   the CRNN model run with numpy (no PyTorch)
-    server/alphabet_table.py  copy of the character table and CTC decoding (no PyTorch)
-    requirements.txt      Python packages for the server
+    server/htr_numpy.py   the CRNN model run with numpy 
+    server/alphabet_table.py  copy of the character table and CTC decoding from latvian_htr
+    requirements.txt      Python packages for the server (pythonanywhere.com)
     dist/                 the built website ("npm run build"), this is what the server serves
 ```
 
