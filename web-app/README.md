@@ -59,7 +59,7 @@ npm install
 pip install -r requirements.txt
 ```
 
-### 3a. Quick way: build and run the server
+### 3. Build and run the server
 
 ```
 npm run build
@@ -67,11 +67,6 @@ python server/app.py
 ```
 
 Open http://127.0.0.1:5000. This is exactly what runs on PythonAnywhere.
-
-### 3b. While changing the website: two terminals
-
-Terminal 1: `python server/app.py` (the AI on port 5000)
-Terminal 2: `npm run dev` (the website on http://localhost:5173 with live reload; requests to `/api` are passed to port 5000)
 
 ### Trying it on a phone
 
@@ -88,12 +83,12 @@ Add `?dev=1` to the address, for example http://localhost:5173/?dev=1. A panel a
 - shorten the timeout to see the timeout message quickly,
 - see the **last request**: every line PNG the browser cut out, the `labels.csv` that was sent and the one that came back. Use this to check the line splitting.
 
-The panel is a developer tool and is in English on purpose. It records images only while it is enabled.
+The panel is a developer tool.
 
 ## Deploying on PythonAnywhere (EU)
 
 The free plan allows one web app, so the website and the AI run as one Flask app
-### 1. Build the website on your computer
+### 1. Build the website
 
 In the `web-app` folder: `npm run build`. This creates `web-app/dist`.
 
@@ -118,11 +113,11 @@ Open a **Bash console** (Consoles tab) and run:
 pip3.10 install --user -r ~/LVRA/web-app/requirements.txt
 ```
 
-Flask, numpy and Pillow are usually already installed there; the command then just confirms them. PyTorch is not needed.
+Flask, numpy and Pillow are usually already installed there; the command then just confirms them.
 
 ### 4. Create the web app
 
-**Web** tab, then **Add a new web app**, then **Manual configuration**, then **Python 3.10**. (If you choose a newer Python, use the matching pip in step 3, for example `pip3.12`.)
+**Web** tab, then **Add a new web app**, then **Manual configuration**, then **Python 3.10**.
 
 ### 5. Edit the WSGI file
 
@@ -153,9 +148,6 @@ On the Web tab switch on **Force HTTPS** (copying to the clipboard needs HTTPS),
 - https://user.name.eu.pythonanywhere.com shows the app.
 - If something fails, the Web tab has an **Error log** link.
 
-### Keeping it running
-
-Free web apps switch off after a while. The Web tab shows the date; press the button there to extend it before that date.
 
 ### Updating
 
@@ -190,9 +182,7 @@ real_dataset/
 
 This is the format `latvian_htr/train.py --real-data` reads. The `text` column holds the **AI's guess**. The Slepie team checks the images and corrects the text before training. Download the folder from the Files tab (or zip it in a Bash console: `cd ~/lvra_data && zip -r real_dataset.zip real_dataset`).
 
-With `training_consent=false` nothing is written to disk: uploads are kept in memory only and are gone when the request ends.
-
-**Privacy promises in the app that the team must keep:** only Slepie team members see this data; it stays on PythonAnywhere EU servers; it is **deleted at the end of the LVRA project**. If any of this changes, update the texts in `src/components/TermsDialog.tsx` and `src/components/PrivacyNotice.tsx`, and change `terms.version` in `src/config/config.ts` so every user is asked again.
+With `training_consent=false` nothing is written to disk.
 
 ## Architecture
 
@@ -223,10 +213,3 @@ Fixed product values are in `src/config/config.ts`: backend (`server` or `mock`)
 ## Line splitting
 
 `src/image/lineSegmentation.ts` evens out the lighting, marks the ink, removes shapes that touch the photo's edge (table, page border), and separates lines by the white gaps between them. Latvian diacritics above and below letters are joined to their line. It works for fairly straight lines with some space between them. Strongly slanted or touching lines come out merged into one image. If that happens too often, the splitting should move to the server and use a stronger method.
-
-## Known limitations
-
-- The AI (`crnn_step30000.pt`) reads new sentences drawn with its handwriting fonts with almost no errors, but on the 41 real handwritten lines in `latvian_htr/data/real_dataset` about 78% of the characters come out wrong. It needs to be trained on real handwriting (collected with consent, see Training data).
-- Speed: about 0.5 to 0.8 s per line on a fast PC, so a page of 15 to 20 lines takes roughly 10 to 15 s there. PythonAnywhere is usually slower. The app gives up after 60 s (`recognitionTimeoutMs` in `src/config/config.ts`).
-- Very large photos may fail to open on older phones with little memory. The user then sees a message to try another image.
-- HEIC photos open only in browsers that support HEIC (mainly Safari).
