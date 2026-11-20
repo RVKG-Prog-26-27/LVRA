@@ -467,7 +467,7 @@ LVRA/
 - **`--resume`** atjauno tikai svarus, nevis pilnu apmācības stāvokli.
 - **Novērtēšana** `evaluate.py` šobrīd tikai CER ar greedy dekodēšanu; WER un Beam Search novērtējuma nav.
 - **Fontu licences:** pirms projekta publiskas izplatīšanas jāpārbauda mapē `fonts/` esošo fontu licences.
-- **Pārbaudes rīks (`verify_labels_git_commit.py`):** nepārbauda, vai etiķete satur tikai alfabēta rakstzīmes; apgriešana pārraksta attēlu failus (oriģināli paliek `_originals/`); projektā nav automātisku testu šim rīkam.
+- **Pārbaudes rīks (`verity_labels.py`):** nepārbauda, vai etiķete satur tikai alfabēta rakstzīmes; apgriešana pārraksta attēlu failus (oriģināli paliek `_originals/`); projektā nav automātisku testu šim rīkam.
 - **Pārsvītrotie vārdi:** dažās marķēto datu partijās tie ir izlaisti, nevis atzīmēti ar `¤`, tāpēc modelis no šīm rindām neiemācās atpazīt svītrojumus.
 
 ---
