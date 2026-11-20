@@ -3,7 +3,6 @@
 **LVRA** ir eksperimentāla sistēma, kas no rokrakstā rakstīta latviešu teksta attēla iegūst rediģējamu digitālu tekstu. Projektu veido divas daļas:
 
 | Daļa | Mape | Tehnoloģijas | Uzdevums |
-| --- | --- | --- | --- |
 | Atpazīšanas modelis | `latvian_htr/` | Python, PyTorch | Apmācīt un palaist CRNN + CTC modeli, kas nolasa vienu teksta rindu no attēla |
 | Web lietotne | `web-app/` | React 18, TypeScript, Vite | Telefonam pielāgota saskarne latviešu valodā: foto → teksts → labošana → kopēšana |
 
@@ -166,7 +165,7 @@ Attēls [B, 1, 64, W]
    ▼  Linear → log_softmax
 [T, B, 130]   rakstzīmju varbūtības katrā solī
    │
-   ▼  CTC dekodēšana (Beam Search)
+   ▼  CTC dekodēšana (Greedy Search)
 Teksts
 ```
 
