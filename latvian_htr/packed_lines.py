@@ -1,26 +1,26 @@
 """
-packed_lines.py - держать готовый набор строк (labels.csv + images/) в оперативной памяти.
+packed_lines.py - keeps a ready-made set of lines (labels.csv + images/) in RAM.
 
-Зачем: при обучении из папки каждую эпоху открываются и декодируются десятки тысяч PNG.
-Этот скрипт ОДИН РАЗ прогоняет набор через ваш же LineFolderDataset (dataset.py) и сохраняет
-готовые uint8-картинки одним файлом в подпапку <набор>/packed/. При обучении этот файл
-читается через memory-map: Windows держит его в RAM один раз, общим для всех воркеров.
+Why: when training from a folder, tens of thousands of PNG files are opened and decoded every epoch.
+This script runs the set through LineFolderDataset (dataset.py) ONCE and saves the ready uint8 images as one
+file in the subfolder <set>/packed/. During training that file is read through a memory map: Windows keeps it
+in RAM once, shared by all workers.
 
-Как пользоваться:
-    # 1) упаковать (один раз после каждой генерации набора):
+How to use:
+    # 1) pack (once after every generation of the set):
     python packed_lines.py data/synth_100k
-    python packed_lines.py data/synth_100k data/synth_val      # можно несколько папок сразу
+    python packed_lines.py data/synth_100k data/synth_val      # several folders at once
 
-    # 2) обучать как раньше - указываете ТУ ЖЕ папку:
+    # 2) train as usual - give THE SAME folder:
     python train.py --synth-data data/synth_100k
 
-train.py сам видит data/synth_100k/packed/ и берёт данные оттуда. Упаковка НЕ используется
-(и читаются PNG, как раньше), если:
-    * labels.csv изменился после упаковки (например, набор сгенерирован заново);
-    * изменился dataset.py, алфавит (alphabet.py) или TARGET_HEIGHT;
-    * проверка после упаковки показала расхождение.
-В этих случаях train.py печатает, почему, и подсказывает команду для переупаковки.
-Чтобы отказаться от упаковки совсем - просто удалите папку packed/.
+train.py sees data/synth_100k/packed/ by itself and takes the data from there. The pack is NOT used (the PNG
+files are read as before) if:
+    * labels.csv changed after packing (for example, the set was generated again);
+    * dataset.py, the alphabet (alphabet.py) or TARGET_HEIGHT changed - even a comment edit in dataset.py counts;
+    * the check after packing found a difference.
+In these cases train.py prints the reason and the command to re-pack.
+To stop using packs completely - just delete the packed/ folder.
 """
 
 import argparse
@@ -48,9 +48,9 @@ def _identity(x):
 
 
 def _dataset_source_hash() -> str:
-    """Отпечаток всего, от чего зависят упакованные картинки: код dataset.py, TARGET_HEIGHT
-    и набор символов алфавита (строки с неизвестными символами LineFolderDataset пропускает).
-    Если что-то из этого поменяли, старая упаковка становится недействительной."""
+    """Fingerprint of everything the packed images depend on: the code of dataset.py, TARGET_HEIGHT and the set
+    of alphabet characters (LineFolderDataset skips lines with unknown characters).
+    If any of these changes, the old pack becomes invalid."""
     import dataset as ds_mod
     h = hashlib.sha1()
     with open(inspect.getsourcefile(ds_mod), "rb") as f:
@@ -82,7 +82,7 @@ def _pack_dir(folder: str) -> str:
 # ------------------------------------------------------------------ dataset
 
 class PackedLineDataset(Dataset):
-    """Отдаёт РОВНО то же, что LineFolderDataset(folder, as_uint8=True), но из одного файла в RAM."""
+    """Returns EXACTLY what LineFolderDataset(folder, as_uint8=True) returns, but from one file in RAM."""
 
     def __init__(self, folder: str, preload: bool = False):
         d = _pack_dir(folder)
@@ -92,11 +92,11 @@ class PackedLineDataset(Dataset):
         self.offsets, self.shapes, self._widths = idx["offsets"], idx["shapes"], idx["widths"]
         with open(os.path.join(d, "extras.pkl"), "rb") as f:
             self.extras = pickle.load(f)
-        self.kind = meta["kind"]                 # "tensor" или "numpy"
+        self.kind = meta["kind"]                 # "tensor" or "numpy"
         self.as_list = meta["item_type"] == "list"
         self.bin_path = os.path.join(d, "pixels.bin")
-        # preload=True: весь файл копируется в память ЭТОГО процесса. Только при --num-workers 0,
-        # иначе на Windows каждый воркер получит свою полную копию.
+        # preload=True: the whole file is copied into the memory of THIS process. Only with --num-workers 0,
+        # otherwise on Windows every worker would get its own full copy.
         self.preload = preload
         self._data = np.fromfile(self.bin_path, dtype=np.uint8) if preload else None
 
@@ -107,7 +107,7 @@ class PackedLineDataset(Dataset):
         return [int(w) for w in self._widths]
 
     def _buf(self):
-        if self._data is None:                   # открывается лениво, отдельно в каждом воркере
+        if self._data is None:                   # opened lazily, separately in every worker
             self._data = np.memmap(self.bin_path, dtype=np.uint8, mode="r")
         return self._data
 
@@ -115,13 +115,13 @@ class PackedLineDataset(Dataset):
         o = int(self.offsets[i])
         shape = tuple(int(s) for s in self.shapes[i])
         count = int(np.prod(shape))
-        a = np.array(self._buf()[o:o + count]).reshape(shape)    # копия: картинку можно менять
+        a = np.array(self._buf()[o:o + count]).reshape(shape)    # a copy: the image may be modified
         img = torch.from_numpy(a) if self.kind == "tensor" else a
         item = (img,) + tuple(self.extras[i])
         return list(item) if self.as_list else item
 
     def __getstate__(self):
-        # memmap НЕ передаём в воркеры (pickle скопировал бы гигабайты); каждый воркер откроет файл сам
+        # the memmap is NOT passed to workers (pickle would copy gigabytes); every worker opens the file itself
         state = self.__dict__.copy()
         if not self.preload:
             state["_data"] = None
@@ -131,7 +131,7 @@ class PackedLineDataset(Dataset):
 # ------------------------------------------------------------------ status / open
 
 def pack_status(folder: str):
-    """(True, n) если упаковка актуальна, иначе (False, причина)."""
+    """(True, n) if the pack is up to date, otherwise (False, reason)."""
     meta_path = os.path.join(_pack_dir(folder), "meta.json")
     if not os.path.isfile(meta_path):
         return False, "no pack"
@@ -150,7 +150,7 @@ def pack_status(folder: str):
 
 
 def open_line_dataset(folder: str, as_uint8: bool = False, **kwargs):
-    """Вместо LineFolderDataset(folder, as_uint8=True): берёт упаковку, если она актуальна, иначе PNG."""
+    """Instead of LineFolderDataset(folder, as_uint8=True): uses the pack if it is up to date, otherwise the PNG files."""
     from dataset import LineFolderDataset
     if as_uint8 and not kwargs:
         ok, info = pack_status(folder)
@@ -172,7 +172,7 @@ def pack(folder: str, workers: int, verify: int = 300):
     os.makedirs(d, exist_ok=True)
     meta_path = os.path.join(d, "meta.json")
     if os.path.exists(meta_path):
-        os.remove(meta_path)                     # пока пакуем, старая упаковка недействительна
+        os.remove(meta_path)                     # while packing, the old pack is invalid
 
     stamp_before = _labels_stamp(folder)
     src_hash = _dataset_source_hash()
@@ -191,16 +191,16 @@ def pack(folder: str, workers: int, verify: int = 300):
     with open(tmp_path, "wb") as f:
         for i, item in enumerate(loader):
             if not isinstance(item, (tuple, list)):
-                sys.exit(f"LineFolderDataset returns {type(item).__name__}, expected tuple/list - send dataset.py")
+                sys.exit(f"LineFolderDataset returns {type(item).__name__}, expected tuple/list - check dataset.py")
             img, rest = item[0], tuple(item[1:])
             if isinstance(img, torch.Tensor):
                 k, a = "tensor", img.numpy()
             elif isinstance(img, np.ndarray):
                 k, a = "numpy", img
             else:
-                sys.exit(f"First element is {type(img).__name__}, expected tensor/array - send dataset.py")
+                sys.exit(f"First element is {type(img).__name__}, expected tensor/array - check dataset.py")
             if a.dtype != np.uint8:
-                sys.exit(f"Image dtype is {a.dtype}, expected uint8 (as_uint8=True) - send dataset.py")
+                sys.exit(f"Image dtype is {a.dtype}, expected uint8 (as_uint8=True) - check dataset.py")
             if kind is None:
                 kind, item_type = k, ("list" if isinstance(item, list) else "tuple")
                 shapes = np.zeros((n, a.ndim), dtype=np.int32)
@@ -222,7 +222,7 @@ def pack(folder: str, workers: int, verify: int = 300):
     if _labels_stamp(folder) != stamp_before:
         sys.exit("labels.csv changed while packing - run again when generation is finished")
 
-    # проверка: упакованное == то, что сейчас отдаёт LineFolderDataset
+    # check: the packed data == what LineFolderDataset returns now
     packed = PackedLineDataset.__new__(PackedLineDataset)
     packed.offsets, packed.shapes, packed._widths = offsets, shapes, widths
     packed.extras, packed.kind, packed.as_list = extras, kind, item_type == "list"
@@ -233,13 +233,13 @@ def pack(folder: str, workers: int, verify: int = 300):
     if bad or packed.widths() != [int(w) for w in fresh.widths()]:
         print(f"!! CHECK FAILED: {len(bad)}/{len(check)} lines differ from LineFolderDataset (e.g. #{bad[:5]}).")
         print("!! Probably dataset.py adds random augmentation - packing would freeze it.")
-        print("!! The pack will NOT be used. Send dataset.py so the augmentation can be moved after packing.")
+        print("!! The pack will NOT be used. Move the augmentation out of dataset.py (or apply it after packing).")
         sys.exit(1)
 
     meta = {"version": FORMAT_VERSION, "n": n, "kind": kind, "item_type": item_type,
             "labels": stamp_before, "dataset_py": src_hash, "bytes": pos,
             "created": time.strftime("%Y-%m-%d %H:%M:%S")}
-    with open(meta_path, "w", encoding="utf-8") as f:     # meta.json пишется ПОСЛЕДНИМ = упаковка готова
+    with open(meta_path, "w", encoding="utf-8") as f:     # meta.json is written LAST = the pack is ready
         json.dump(meta, f, indent=1)
     print(f"OK: {n:,} lines, {pos / 1e9:.2f} GB, checked {len(check)} random lines - identical. "
           f"{time.time() - t0:.0f} s")
@@ -247,9 +247,9 @@ def pack(folder: str, workers: int, verify: int = 300):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Pack dataset folders (labels.csv + images/) for RAM training.")
-    ap.add_argument("folders", nargs="+", help="папки с labels.csv + images/")
+    ap.add_argument("folders", nargs="+", help="folders with labels.csv + images/")
     ap.add_argument("--workers", type=int, default=max(1, min(8, (os.cpu_count() or 2) - 2)))
-    ap.add_argument("--verify", type=int, default=300, help="сколько случайных строк сверить после упаковки")
+    ap.add_argument("--verify", type=int, default=300, help="how many random lines to compare after packing")
     a = ap.parse_args()
     for folder in a.folders:
         pack(folder, a.workers, a.verify)

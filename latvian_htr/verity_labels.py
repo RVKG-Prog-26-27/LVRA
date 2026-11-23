@@ -634,20 +634,20 @@ class App:
         self.canvas.delete("stars")
         s = max(0.6, min(width, height) / 800.0)
 
-        # Определяем координаты отображаемой картинки на холсте (если она есть)
+        # Find the coordinates of the displayed picture on the canvas (if there is one)
         img_box = None
         if self.img_size[0] > 0 and self.img_size[1] > 0:
             W, H = self.img_size
             img_w = W * self.eff_scale
             img_h = H * self.eff_scale
-            # Добавим небольшой отступ (например, 4 пикселя), чтобы звёзды не липли вплотную к краям картинки
+            # Add a small margin (e.g. 4 pixels) so the stars do not stick to the edges of the picture
             pad = 4
             img_box = (self.ox - pad, self.oy - pad, self.ox + img_w + pad, self.oy + img_h + pad)
 
         for st in self.stars:
             x, y = st["x"] * width, st["y"] * height
 
-            # Если звезда попадает внутрь области картинки — пропускаем её отрисовку
+            # If a star falls inside the picture area, skip drawing it
             if img_box and img_box[0] <= x <= img_box[2] and img_box[1] <= y <= img_box[3]:
                 continue
 
@@ -665,7 +665,7 @@ class App:
         for m in self.meteors:
             x0 = m["x"] - m["vx"] * 0.45
             y0 = m["y"] - m["vy"] * 0.45
-            # Падающие звезды тоже не рисуем поверх картинки
+            # Falling stars are not drawn over the picture either
             if img_box and img_box[0] <= m["x"] <= img_box[2] and img_box[1] <= m["y"] <= img_box[3]:
                 continue
             fade = min(1.0, m["life"] * 2)
@@ -873,7 +873,7 @@ class App:
         else:
             self.img_size = (0, 0)
 
-        # Сначала рассчитываем положение картинки, чтобы звёзды учитывали её актуальные границы
+        # First compute the picture position so the stars respect its current bounds
         self.layout()
         self.draw_starfield(cw, ch)
 

@@ -1,4 +1,5 @@
 torch>=2.2
 numpy
 pillow
+# only for the labelling tool verity_labels.py (it plays the videos from prikol/):
 opencv-python-headless

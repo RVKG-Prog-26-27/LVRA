@@ -1,37 +1,19 @@
 """
-Synthetic data generator (v3.1).
+Synthetic handwriting-line generator.
 
-v3.1 - speed only, the data looks the same (labels identical for the same seed, image statistics unchanged):
-  * Glyphs are rendered once per font at REF_FS and scaled inside the per-letter transform, instead of being
-    rendered and cached for every font size 56..88. The cache is ~35x smaller, warms up after a few hundred
-    lines and no longer overflows with many fonts (before: 60 000-entry cache, 500+ MB per worker).
-  * Per-letter scale + tilt in one affine resampling (before: resize + rotate = two passes).
-  * Join points of letters are only computed for joined (cursive) lines.
-  * Ink thickening: separable numpy 3x3 minimum instead of ImageFilter.MinFilter (bit-identical, ~25x faster).
-  * Wavy baseline moves runs of columns at once instead of a per-pixel gather (bit-identical).
-  * Scalar np.clip -> plain min/max; float32 noise; sized font loaded only for the plain-font path.
-  Net: ~1.5x faster per line with a warm cache, ~2x with many fonts / fresh workers.
+make_sample() picks a random font, builds a text line the font can draw and renders it so that it looks like
+a photo of a notebook page:
+  * letter-by-letter "handwritten" rendering: every letter has its own size, shift and tilt that drift smoothly
+    from letter to letter; spacing follows the silhouettes of neighbours; letters can be joined (cursive);
+    punctuation is written more carelessly than letters;
+  * crossed-out words: either a mistake with the right word written smaller above it (the label then holds
+    the right word) or a plain strike (label holds STRIKE_MARK or the word is skipped, see STRIKE_MODE);
+  * roman numerals, numbers, symbols; grid / ruled paper, uneven light, blur, noise and JPEG artefacts;
+  * fonts that lack some characters: a missing glyph is taken from the default font (see default_font()),
+    scaled to the x-height of the line's own font. A character is only skipped if NEITHER font has it.
 
-What changed in v3 vs. v2:
-  * CORRECTIONS ABOVE CROSSED-OUT WORDS, like in real handwriting. A struck word can now be a
-    "mistake" (typo, missing / wrong diacritic, swapped or doubled letter, wrong digit, another word):
-    it is drawn and crossed out, and the RIGHT word is written smaller above it. The label holds the
-    right word at that position (the model must learn: struck word + text above -> read the text above).
-    Struck words without a correction keep the old behaviour (STRIKE_MODE 'mark' / 'skip').
-    Punctuation stays outside the strike: "valodu." -> "valudu." with only "valudu" struck, "valodu" above.
-  * Speed: glyph masks, stem width and x-height are cached (before: every letter of every line was
-    rendered twice from scratch); the wavy-baseline warp is vectorised; the corpus filter per font is cached.
-  * Noise / blur / JPEG artefacts are applied AFTER the downscale to 64 px. Before, the 3-4x downscale
-    averaged most of the noise and blur away, so the model rarely saw a really noisy line.
-  * All randomness goes through `random` (numpy noise uses a generator seeded from it): one random.seed()
-    makes a dataset reproducible, and DataLoader workers no longer repeat the same numpy noise.
-  * Ruled (lined) notebook paper in addition to grid paper.
-  * Fixes: random_tokens could fall back to a word the font cannot draw; font_charset now also rejects
-    glyphs that render empty; a missing glyph in the middle of a word no longer makes the next letter
-    jump back onto the word start; word indices stay in sync even if a word has no drawable glyphs.
-
-v2 (kept): TARGET_HEIGHT 64, big rendering + downscale, metric-based line height, random word lines,
-notebook-photo augmentation, letter-by-letter "handwritten" rendering, roman numerals, strike-outs.
+Everything random goes through `random`: one random.seed() makes a data set reproducible (numpy noise uses a
+generator seeded from `random`). Lines are TARGET_HEIGHT pixels high (model.py expects exactly that).
 """
 
 import functools
@@ -49,9 +31,12 @@ from alphabet import ALPHABET, STRIKE_MARK
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
-# Candidate paths for a default font that ships with the OS, checked in order.
-# Must support Latvian diacritics (ā č ē ģ ī ķ ļ ņ š ū ž).
-_FALLBACK_CANDIDATES = [
+# Optional: a font with this name inside fonts/ is used as THE default font (recommended - then the data set
+# looks the same on every machine). It is not used as an ordinary handwriting font.
+DEFAULT_FONT_NAMES = ("default.ttf", "default.otf")
+
+# System fonts that can serve as the default font when fonts/ has none, in order of preference.
+_SYSTEM_FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",   # Linux
     "C:\\Windows\\Fonts\\arial.ttf",                      # Windows
     "C:\\Windows\\Fonts\\segoeui.ttf",                    # Windows
@@ -59,27 +44,18 @@ _FALLBACK_CANDIDATES = [
     "/Library/Fonts/Arial.ttf",                           # macOS
 ]
 
-
-def _find_fallback_font() -> str:
-    for path in _FALLBACK_CANDIDATES:
-        if os.path.exists(path):
-            return path
-    raise FileNotFoundError(
-        "No usable default font found and fonts/ is empty. "
-        "Put at least one .ttf/.otf file (with Latvian diacritics support) into the fonts/ folder."
-    )
-
-
-FALLBACK_FONT = _find_fallback_font()
-
 TARGET_HEIGHT = 64  # fixed line height fed into the CNN (model.py expects exactly 64)
+
+
+def _fonts_dir_files() -> list[str]:
+    return sorted(glob.glob(os.path.join(FONT_DIR, "*.ttf")) + glob.glob(os.path.join(FONT_DIR, "*.otf")))
 
 
 @functools.lru_cache(maxsize=1)
 def _available_fonts() -> list[str]:
-    """Fonts in fonts/ (scanned once per process, not for every sample)."""
-    fonts = glob.glob(os.path.join(FONT_DIR, "*.ttf")) + glob.glob(os.path.join(FONT_DIR, "*.otf"))
-    return sorted(fonts) if fonts else [FALLBACK_FONT]
+    """Fonts used to draw lines: fonts/*.ttf|otf except the dedicated default font (scanned once per process)."""
+    fonts = [p for p in _fonts_dir_files() if os.path.basename(p).lower() not in DEFAULT_FONT_NAMES]
+    return fonts if fonts else [default_font()]
 
 
 def _glyph_bytes(font: ImageFont.FreeTypeFont, ch: str) -> bytes:
@@ -95,8 +71,8 @@ _EMPTY_GLYPH = bytes(100 * 100)
 def font_charset(font_path: str) -> frozenset:
     """Which characters of our alphabet this font can really draw.
     A missing glyph is drawn as an empty box (.notdef) or as nothing at all, while the label keeps the real
-    letter - the network would then learn 'box = a / ā / š / ž ...', which is impossible. So we never
-    put such characters into texts rendered with this font."""
+    letter - the network would then learn 'box = a / ā / š / ž ...', which is impossible. That is why such
+    characters are never drawn with this font: drawable_charset() lets the default font supply them."""
     font = ImageFont.truetype(font_path, 48)
     notdef = _glyph_bytes(font, "\uFFFF")
     ok = {" "}
@@ -107,6 +83,33 @@ def font_charset(font_path: str) -> frozenset:
         if b != notdef and b != _EMPTY_GLYPH:
             ok.add(ch)
     return frozenset(ok)
+
+
+@functools.lru_cache(maxsize=1)
+def default_font() -> str:
+    """The font that draws every glyph a line's own font is missing (§ ° € ö ...). Chosen in this order:
+      1. fonts/default.ttf or fonts/default.otf  (recommended: identical on every machine);
+      2. the system font (DejaVu Sans, Arial, ...) that covers most of the alphabet;
+      3. the font from fonts/ that covers most of the alphabet.
+    Resolved lazily (not at import time), so importing this module never fails."""
+    for name in DEFAULT_FONT_NAMES:
+        path = os.path.join(FONT_DIR, name)
+        if os.path.exists(path):
+            return path
+    for pool in ([p for p in _SYSTEM_FONT_CANDIDATES if os.path.exists(p)], _fonts_dir_files()):
+        if pool:
+            return max(pool, key=lambda p: len(font_charset(p)))     # ties: the first one wins
+    raise FileNotFoundError(
+        "No font found. Put at least one .ttf/.otf file (with Latvian diacritics support) into fonts/ "
+        "- ideally also fonts/default.ttf with the widest character coverage (e.g. DejaVu Sans)."
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def drawable_charset(font_path: str) -> frozenset:
+    """Characters that can appear in a line drawn with this font: its own glyphs plus those the default font
+    supplies. Only characters that NEITHER font has are excluded from the generated texts."""
+    return font_charset(font_path) | font_charset(default_font())
 
 
 # --------------------------------------------------------------------------- roman numerals
@@ -195,14 +198,30 @@ def load_words() -> list[str]:
     return words
 
 
-def load_corpus() -> list[str]:
-    """Kept for backward compatibility - returns the word pool."""
-    return load_words()
-
 
 def _random_number() -> str:
     a, b = random.randint(0, 9999), random.randint(0, 99)
     return random.choice([str(a), f"{a},{b}", f"({a})", f"{a}.", f"{a}%", f"{b})", f"{a} - {b}"])
+
+
+SYMBOL_PROB = 0.03     # share of tokens that are symbol expressions (§ 12, 25°C, x ≥ 3, 5 × 4, ½, → ...)
+
+# {n}, {m}, {k} are replaced by random numbers. Characters a font cannot draw are skipped by the caller
+# (random_tokens), so a template with an unavailable symbol is simply not used for that font.
+_SYMBOL_TEMPLATES = [
+    "§ {n}", "{n}°", "{n}°C", "{n}‰", "{n} €", "€{n}", "${n}", "£{n}", "¥{n}", "¢{n}", "№ {n}", "№{n}",
+    "{n}²", "{n}³", "{n}¹", "½", "¼", "¾", "{n}{m}/{k}",
+    "{n} × {m}", "{n} ÷ {m}", "{n} ± {m}", "{n} − {m}", "{n} + {m} = {k}", "{n} · {m}",
+    "x ≥ {n}", "x ≤ {n}", "x ≠ {m}", "x ≈ {n}", "√{n}", "∞",
+    "{n} → {m}", "→", "←", "↑", "↓", "⇒",
+    "{n}′", "{n}″", "[{n}]", "{{{n}}}", "{n}|{m}", "{n}\\{m}", "{n}^{m}", "{n}~", "#{n}", "@{n}", "&", "*{n}",
+    "©", "®", "™", "¶", "…", "—", "–", "‹{n}›", "«{n}»", "¡{n}!", "¿{n}?", "`{n}`", "´{n}",
+]
+
+
+def _symbol_token() -> str:
+    return random.choice(_SYMBOL_TEMPLATES).format(
+        n=random.randint(1, 999), m=random.randint(1, 99), k=random.randint(1, 999))
 
 
 # Filtering a big corpus for every sample is O(corpus); the result only depends on (word list, font charset).
@@ -242,6 +261,8 @@ def random_tokens(words: list[str], max_chars: int = 60, allowed=None) -> list[s
             w = _random_number()
         elif r < 0.07 + ROMAN_PROB:
             w = _roman_token()
+        elif r < 0.07 + ROMAN_PROB + SYMBOL_PROB:
+            w = _symbol_token()
         else:
             w = random.choice(words)
         if allowed is not None and not set(w) <= allowed:
@@ -381,13 +402,14 @@ def _pick_strike() -> str:
 
 
 def make_sample(words: list[str], max_chars: int = 60, augment: bool = True) -> tuple[Image.Image, str]:
-    """Pick a random font, build a text this font can fully draw, render it. Returns (image, label).
+    """Pick a random font, build a text that this font (plus the default font for its missing glyphs) can fully
+    draw, render it. Returns (image, label).
     Some lines get crossed-out words (STRIKE_LINE_PROB). A crossed-out word is either
       * a mistake with the right word written above it (CORRECTION_PROB) -> label has the right word, or
       * just struck -> STRIKE_MODE 'mark': label has STRIKE_MARK (¤); 'skip': the word is missing from the label."""
     fonts = _available_fonts()
     font_path = random.choice(fonts)
-    allowed = font_charset(font_path)
+    allowed = drawable_charset(font_path)
     pool = _words_for(words, allowed)
     tokens = random_tokens(words, max_chars, allowed)
 
@@ -482,9 +504,30 @@ REF_FS = 80
 
 
 @functools.lru_cache(maxsize=None)
+def _ref_x_height(font_path: str) -> int:
+    """Height of the letter x of a font at REF_FS (0 if the font has none)."""
+    g = _glyph_mask(_load_font(font_path, REF_FS), "x", REF_FS)
+    return g[0].shape[0] if g is not None else 0
+
+
+@functools.lru_cache(maxsize=None)
+def _fallback_size(font_path: str, donor_path: str) -> int:
+    """Font size at which glyphs borrowed from `donor_path` match the x-height of `font_path`."""
+    mine, theirs = _ref_x_height(font_path), _ref_x_height(donor_path)
+    k = _clip(mine / theirs, 0.6, 1.6) if mine and theirs else 1.0
+    return max(8, int(round(REF_FS * k)))
+
+
+@functools.lru_cache(maxsize=None)
 def _ref_glyph(font_path: str, ch: str):
-    """_glyph_mask at REF_FS, cached. The mask is read-only: callers must copy before changing it."""
-    g = _glyph_mask(_load_font(font_path, REF_FS), ch, REF_FS)
+    """_glyph_mask at REF_FS, cached. The mask is read-only: callers must copy before changing it.
+    If the font has no glyph for `ch`, the glyph comes from the default font (sized to the same x-height)."""
+    src, size = font_path, REF_FS
+    if ch != " " and ch not in font_charset(font_path):
+        donor = default_font()
+        if donor != font_path and ch in font_charset(donor):
+            src, size = donor, _fallback_size(font_path, donor)
+    g = _glyph_mask(_load_font(src, size), ch, size)
     if g is not None:
         g = (np.ascontiguousarray(g[0]), g[1], g[2])
         g[0].setflags(write=False)
@@ -606,7 +649,7 @@ def _bezier(p0, p1, ctrl, n=14):
             for t in np.linspace(0, 1, n)]
 
 
-SMALL_PUNCT = set(",.;:'\"\u201e\u201c\u201d\u2018\u2019")   # marks that fonts draw as tiny specks
+SMALL_PUNCT = set(",.;:'\"\u201e\u201c\u201d\u2018\u2019\u201a`\u00b4\u00b7\u2032\u2033")   # marks that fonts draw as tiny specks
 PEN_PUNCT = set(".,;:")      # these four are drawn with our own pen (size follows the pen / font size)
 PUNCT_MIN_SIZE = 0.16        # quotes: smallest size, in font sizes
 # scatter of the small marks: clearly looser than letters, but a dot must never fly away or turn into a blot
@@ -958,13 +1001,17 @@ def render_text_line(text: str, font_path: str | None = None, augment: bool = Tr
     pad_y = int((ref_bottom - ref_top) * random.uniform(0.05, 0.14))
 
     ink = random.randint(0, 75)
-    if (struck and any(struck)) or (hand is None and any(c in SMALL_PUNCT for c in text)):
-        hand = True        # crossing out needs letter positions; lines with commas/dots must keep them visible
+    own = font_charset(font_path)
+    needs_fallback = any(c != " " and c not in own for c in text)   # some glyphs come from the default font
+    if needs_fallback or (struck and any(struck)) or (hand is None and any(c in SMALL_PUNCT for c in text)):
+        # Per-glyph rendering is required for: borrowed glyphs, crossing out (needs letter positions) and lines
+        # with commas/dots (they must stay visible).
+        hand = True
     if hand is None:
         hand = random.random() < HANDWRITTEN_PROB      # letter-by-letter, hand-like variation
     if connect is None:
         connect = random.random() < CONNECT_PROB       # ... with letters joined by strokes
-    if hand and any(c.isalnum() for c in text):
+    if (hand and any(c.isalnum() for c in text)) or needs_fallback:
         img = _render_handwritten(text, font_path, font_size, ink, pad_x, pad_y, join=connect,
                                   extent=(ref_top, ref_bottom), struck=struck, roman=roman, fixes=fixes)
     else:

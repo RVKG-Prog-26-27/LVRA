@@ -1,14 +1,11 @@
-node_modules
-*.log
-.DS_Store
-# Python: pagaidu faili un virtuālās vides
+# Python: temporary files and virtual environments
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 .ipynb_checkpoints/
 
-# Lokālie iestatījumi un piekļuves dati
+# Local settings and credentials
 .env
 .env.*
 !.env.example
@@ -16,19 +13,29 @@ venv/
 *.key
 .idea/
 .vs/
+.vscode/
 
-# Atkarības un kompilēšanas rezultāti
+# Dependencies and build output
 node_modules/
 build/
 dist/
 bin/
 obj/
 
-
-# Sistēmas un pagaidu faili
+# System and temporary files
 .DS_Store
 Thumbs.db
 *.log
 *.tmp
 
-.vscode/
+# Neural network part (latvian_htr): generated or per-user files
+# (checkpoints_v2/ is NOT ignored: the web server uses crnn_best_migrated.pt from there)
+latvian_htr/checkpoints/
+latvian_htr/samples/
+latvian_htr/data/synth_*/
+latvian_htr/data/**/packed/
+# Labelling tool (verify_labels): per-user state, backups and original images before cropping
+latvian_htr/data/real_dataset/images/.verify_progress
+latvian_htr/data/real_dataset/images/.verify_settings.json
+latvian_htr/data/real_dataset/images/_originals/
+*.csv.bak
