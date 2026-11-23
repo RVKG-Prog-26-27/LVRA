@@ -54,5 +54,5 @@ export const config = {
   },
 
   /** Contact email shown in the terms of use and the privacy notice. */
-  privacyContactEmail: 'slepie@gmail.com',
+  privacyContactEmail: 'slepie.dev@gmail.com',
 } as const;
