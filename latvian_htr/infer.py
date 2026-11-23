@@ -12,6 +12,7 @@ import argparse
 import torch
 
 from alphabet import NUM_CLASSES, decode_beam_search
+from confidence import WordResult, format_categories, read_words, site_text
 from dataset import image_to_tensor, open_line_image
 from model import CRNN, load_model
 
@@ -32,6 +33,17 @@ def predict(model: CRNN, image_tensor: torch.Tensor, device: torch.device, beam_
     return decode_beam_search(sequence_log_probs, beam_width=beam_width)   # keeps several best CTC prefixes
 
 
+def predict_with_words(model: CRNN, image_tensor: torch.Tensor, device: torch.device,
+                       beam_width: int = 5) -> tuple[str, list[WordResult]]:
+    """Like predict(), but also splits the line into words and gives every word a confidence and a category
+    (1 - could not recognise, 2 - not sure, 3 - sure; see confidence.py). The text itself is read exactly as before."""
+    model.eval()
+    with torch.no_grad():
+        sequence_log_probs = model(image_tensor.to(device)).squeeze(1)   # [T, C]
+    text = decode_beam_search(sequence_log_probs, beam_width=beam_width)
+    return text, read_words(sequence_log_probs)
+
+
 # Runs only when the file is started directly ("python infer.py ...").
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -46,6 +58,11 @@ if __name__ == "__main__":
     model = load_model(args.checkpoint, NUM_CLASSES, device)
 
     image_tensor = load_image(args.image)
-    text = predict(model, image_tensor, device, beam_width=args.beam_width)
+    text, words = predict_with_words(model, image_tensor, device, beam_width=args.beam_width)
     # !r prints the string "as in code" - in quotes, so spaces at the edges are visible.
     print(f"Text: {text!r}")
+    for w in words:
+        shown = "-" if w.site_value is None else w.site_value
+        print(f"  {w.raw!r:<24} {w.confidence * 100:5.1f}%  {w.category} пункт  -> сайт: {shown}")
+    print(f"For the site: {site_text(words)!r}")
+    print(format_categories(words))

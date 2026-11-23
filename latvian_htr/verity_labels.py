@@ -1,5 +1,4 @@
 import csv
-import json
 import os
 import random
 import shutil
@@ -20,10 +19,8 @@ FOLDER = BASE / "data" / "real_dataset" / "images"
 FOLDER_CSV = BASE / "data" / "real_dataset"
 CSV_PATH = FOLDER_CSV / "labels.csv"
 
-PROGRESS_PATH = os.path.join(FOLDER, ".verify_progress")
-SETTINGS_PATH = os.path.join(FOLDER, ".verify_settings.json")
 ORIG_DIR = os.path.join(FOLDER, "_originals")
-PRIKOL_DIR = BASE / "prikol"   # GIFs for the slots are taken from this folder
+PRIKOL_DIR = BASE / "gifs for verity_labels"   # GIFs for the slots are taken from this folder
 
 # Cosmic Purple theme
 BG = "#130924"
@@ -380,7 +377,7 @@ class MediaSlot:
         self.frame.after(self.POLL_MS, self.poll)
 
     def show_empty(self):
-        self.label.config(image="", text="put images / GIFs / videos\ninto 'prikol'")
+        self.label.config(image="", text="put images / GIFs / videos\ninto 'gifs for verity_labels'")
 
     def on_resize(self, e):
         self.target = (max(e.width - 2, 8), max(e.height - 2, 8))
@@ -439,7 +436,7 @@ class App:
         self.original = [r[1] for r in self.rows]
         self.dirty = False
         self.photo = None
-        self.idx = self.load_progress()
+        self.idx = 0
 
         # Starfield animation state
         self.stars = []
@@ -713,50 +710,14 @@ class App:
             return []
 
     def load_settings(self):
-        saved, saved_big = [], None
-        try:
-            with open(SETTINGS_PATH, encoding="utf-8") as f:
-                data = json.load(f)
-            saved, saved_big = data.get("gifs", []), data.get("big")
-        except Exception:
-            pass
         files = self.scan_prikol()
-        by_name = {p.name: p for p in files}
         for i, slot in enumerate(self.gif_slots):
-            name = Path(saved[i]).name if i < len(saved) and saved[i] else None
-            path = by_name.get(name)
-            if path is None and files:
-                path = files[i % len(files)]
-            slot.set_file(path)
-        path = by_name.get(Path(saved_big).name) if saved_big else None
-        if path is None and files:
-            path = files[len(self.gif_slots) % len(files)]
-        self.big_slot.set_file(path)
+            slot.set_file(files[i % len(files)] if files else None)
+        self.big_slot.set_file(files[len(self.gif_slots) % len(files)] if files else None)
 
     def save_settings(self):
-        try:
-            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-                json.dump({"gifs": [s.path.name if s.path else None for s in self.gif_slots],
-                           "big": self.big_slot.path.name if self.big_slot.path else None},
-                          f, ensure_ascii=False)
-        except Exception:
-            pass
+        # settings are no longer saved, only return focus to the text field
         self.text.focus_set()
-
-    def load_progress(self):
-        try:
-            with open(PROGRESS_PATH, encoding="utf-8") as f:
-                i = int(f.read().strip())
-            return min(max(i, 0), len(self.rows) - 1)
-        except Exception:
-            return 0
-
-    def save_progress(self):
-        try:
-            with open(PROGRESS_PATH, "w", encoding="utf-8") as f:
-                f.write(str(self.idx))
-        except Exception:
-            pass
 
     def commit_text(self):
         if not self.rows:
@@ -771,9 +732,6 @@ class App:
         if not self.dirty:
             self.set_status("No changes")
             return
-        bak = str(CSV_PATH) + ".bak"
-        if not os.path.exists(bak):
-            shutil.copy2(CSV_PATH, bak)
         tmp = str(CSV_PATH) + ".tmp"
         with open(tmp, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
@@ -804,7 +762,6 @@ class App:
             self.sel_start = None
             self.reset_view()
             self.show_image()
-            self.save_progress()
             return
         fn, txt = self.rows[self.idx]
         self.info.config(text=f"{self.idx + 1} / {len(self.rows)}")
@@ -819,7 +776,6 @@ class App:
         self.sel_start = None
         self.reset_view()
         self.show_image()
-        self.save_progress()
 
     def get_image(self):
         if not self.rows:
@@ -1027,7 +983,7 @@ class App:
             shutil.copy2(path, backup)
         im = Image.open(path)
         im.crop((x0, y0, x1, y1)).save(path)
-        self.set_status(f"Cropped: {x1 - x0}x{y1 - y0} px (original in _originals)", OK_COLOR)
+        self.set_status(f"Cropped: {x1 - x0}x{y1 - y0} px (original is kept until the program is closed)", OK_COLOR)
         self.sel = None
         self.reset_view()
         self.name.config(text=self.rows[self.idx][0] + "   [cropped]")
@@ -1338,7 +1294,7 @@ class App:
         self.commit_text()
         if self.dirty:
             self.save()
-        self.save_progress()
+        shutil.rmtree(ORIG_DIR, ignore_errors=True)
         self.root.destroy()
 
 

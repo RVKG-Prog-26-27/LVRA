@@ -21,6 +21,7 @@ from torch.utils.data import Subset
 
 from alphabet import NUM_CLASSES, decode_beam_search, decode_greedy
 from dataset import DEFAULT_REAL_VAL_FRACTION, LineFolderDataset, SyntheticHTRDataset, split_real
+from confidence import CAT_SURE, CAT_UNREADABLE, CAT_UNSURE, format_categories, read_words
 from metrics import cer, wer
 from model import load_model
 
@@ -30,6 +31,9 @@ def evaluate(model, dataset, device, n: int | None = None, show: int = 5, title:
     model.eval()
     n = min(n or len(dataset), len(dataset))
     refs, greedy, beam = [], [], []
+    all_words = []                      # every word of every line with its confidence category
+    right_by_cat = {CAT_UNREADABLE: 0, CAT_UNSURE: 0, CAT_SURE: 0}
+    compared_by_cat = {CAT_UNREADABLE: 0, CAT_UNSURE: 0, CAT_SURE: 0}
     with torch.no_grad():
         for i in range(n):
             img, text = dataset[i]
@@ -37,6 +41,13 @@ def evaluate(model, dataset, device, n: int | None = None, show: int = 5, title:
             idx = log_probs.argmax(dim=2).squeeze(1).tolist()
             refs.append(text)
             greedy.append(decode_greedy(idx))
+            words = read_words(log_probs.squeeze(1))
+            all_words.extend(words)
+            ref_words = text.split()
+            if len(ref_words) == len(words):    # words can be compared one by one only if the count matches
+                for ref_word, w in zip(ref_words, words):
+                    compared_by_cat[w.category] += 1
+                    right_by_cat[w.category] += (ref_word == w.raw)
             if beam_width > 0:
                 beam.append(decode_beam_search(log_probs.squeeze(1), beam_width=beam_width))
 
@@ -48,6 +59,10 @@ def evaluate(model, dataset, device, n: int | None = None, show: int = 5, title:
     print("  " + line("greedy", greedy))
     if beam_width > 0:
         print("  " + line(f"beam{beam_width}", beam))
+    print("  Categories of words (share of all words):")
+    print("  " + format_categories(all_words).replace("\n", "\n  "))
+    print("  Really correct words per category (lines with a matching word count only): " + ", ".join(
+        f"{c} пункт {right_by_cat[c]}/{compared_by_cat[c]}" for c in (CAT_UNREADABLE, CAT_UNSURE, CAT_SURE)))
     best = beam if beam_width > 0 else greedy
     for r, h in list(zip(refs, best))[:show]:
         print(f"  correct: {r}\n  model  : {h}\n")
